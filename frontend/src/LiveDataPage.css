@@ -1,0 +1,12 @@
+.live-data-page { max-width: 990px; margin: 0 auto; }
+.live-data-card { padding: 21px; margin-bottom: 14px; }
+.live-data-card h3 { margin: 0 0 8px; font-size: 17px; }
+.live-data-card p { color: #738778; font-size: 12px; line-height: 1.6; }
+.live-data-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.live-data-file { display: grid; gap: 8px; max-width: 480px; margin: 20px 0 12px; font-size: 12px; font-weight: 800; }
+.live-data-file input { padding: 9px; border: 1px solid #cbded0; border-radius: 8px; background: #f8fbf8; }
+.live-data-preview, .live-data-errors { display: grid; gap: 8px; margin-top: 18px; padding: 17px; border: 1px solid #c5e3ce; border-radius: 8px; background: #f0f9f1; font-size: 13px; }
+.live-data-preview span { color: #438058; }
+.live-data-preview button { justify-self: start; }
+.live-data-errors { border-color: #e5c9aa; background: #fff8ef; }
+.live-data-result { margin-top: 15px; }

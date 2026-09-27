@@ -1,0 +1,62 @@
+.mobile-app { min-height: 100dvh; padding: 0 16px 32px; background: #f1f6f1; color: #18382a; }
+.mobile-inner { width: 100%; max-width: 540px; margin: 0 auto; }
+.mobile-app button, .mobile-app input { font-size: 15px; }
+.mobile-header { display: flex; align-items: start; justify-content: space-between; padding: 24px 0 22px; }
+.mobile-header span { color: #4c8560; font-size: 12px; font-weight: 800; }
+.mobile-header h1 { margin-top: 5px; font-size: 28px; }
+.mobile-header button, .mobile-refresh { border: 0; background: transparent; color: #28754c; font-weight: 700; }
+.mobile-header button { padding: 7px 0 7px 12px; }
+.mobile-search, .mobile-scan, .mobile-detail, .mobile-work, .mobile-results { margin-bottom: 14px; padding: 18px; border: 1px solid #dbe8dd; border-radius: 16px; background: white; box-shadow: 0 5px 16px #173d2110; }
+.mobile-search label, .mobile-login-form label { display: block; margin-bottom: 9px; font-size: 13px; font-weight: 800; }
+.mobile-search > div { display: flex; gap: 8px; }
+.mobile-search input, .mobile-login-form input { width: 100%; min-width: 0; height: 46px; padding: 0 12px; border: 1px solid #cddfd2; border-radius: 9px; background: white; color: #173629; outline: none; }
+.mobile-search input:focus, .mobile-login-form input:focus { border-color: #258253; }
+.mobile-primary { min-height: 46px; padding: 0 17px; border: 0; border-radius: 9px; background: #247b4d; color: white; font-weight: 800; white-space: nowrap; }
+.mobile-section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.mobile-section-title h2 { font-size: 17px; }
+.mobile-section-title > span:not(.warehouse-status) { color: #789181; font-size: 12px; }
+.mobile-scan-actions { display: flex; gap: 9px; }
+.mobile-scan-actions > * { flex: 1; text-align: center; }
+.mobile-photo-button { display: grid; place-items: center; min-height: 46px; padding: 0 10px; border: 1px solid #b9d4c1; border-radius: 9px; background: #f4faf5; color: #266b43; font-size: 15px; font-weight: 800; cursor: pointer; }
+.mobile-photo-primary { border-color: #247b4d; background: #247b4d; color: white; }
+.mobile-photo-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.mobile-photo-button:focus-within { outline: 3px solid #e8b655; outline-offset: 2px; }
+.mobile-scan .camera-frame { margin-top: 14px; }
+.mobile-scan .camera-frame video { width: 100%; max-height: 340px; border-radius: 10px; object-fit: cover; }
+.mobile-scan .scanner-message { margin: 12px 0 0; color: #996319; font-size: 13px; line-height: 1.5; }
+.mobile-feedback, .mobile-error { padding: 12px 14px; border-radius: 9px; font-size: 13px; }
+.mobile-feedback { background: #e6f1ec; color: #276a48; }
+.mobile-error { background: #fff0e9; color: #a34a31; }
+.mobile-code { display: block; margin-bottom: 14px; font-size: 26px; letter-spacing: .02em; overflow-wrap: anywhere; }
+.mobile-detail dl { margin: 0; }
+.mobile-detail dl > div { display: flex; justify-content: space-between; gap: 12px; padding: 13px 0; border-top: 1px solid #eef2ee; font-size: 14px; }
+.mobile-detail dt { color: #718b78; }
+.mobile-detail dd { margin: 0; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.mobile-detail > p { margin: 0; color: #5b7865; font-size: 14px; }
+.mobile-refresh { width: 100%; min-height: 42px; margin-top: 10px; border: 1px solid #b9d4c1; border-radius: 9px; background: #f4faf5; }
+.mobile-device-status { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 13px; color: #5b7865; }
+.mobile-device-status button, .mobile-check-request { border: 0; background: transparent; color: #28754c; font-weight: 700; }
+.mobile-device-register { display: grid; gap: 8px; margin-bottom: 14px; }
+.mobile-device-register label, .mobile-target-label { display: block; font-size: 13px; font-weight: 800; }
+.mobile-device-register input, .mobile-work select { width: 100%; min-height: 46px; padding: 0 12px; border: 1px solid #cddfd2; border-radius: 9px; background: white; color: #173629; font-size: 15px; }
+.mobile-device-register button { min-height: 42px; border: 1px solid #b9d4c1; border-radius: 9px; background: #f4faf5; color: #266b43; font-weight: 800; }
+.mobile-work-hint { margin: 0 0 14px; color: #6b806f; font-size: 13px; line-height: 1.5; }
+.mobile-target-label { margin-bottom: 8px; }
+.mobile-submit { width: 100%; margin-top: 14px; }
+.mobile-submit:disabled { opacity: .55; }
+.mobile-check-request { width: 100%; min-height: 40px; margin-top: 8px; }
+.mobile-back-results { width: 100%; min-height: 42px; margin-top: 7px; border: 0; background: transparent; color: #28754c; font-weight: 700; }
+.mobile-result { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 14px 0; border: 0; border-top: 1px solid #edf2ee; background: transparent; color: inherit; text-align: left; }
+.mobile-result > span:first-child { display: grid; gap: 4px; min-width: 0; }
+.mobile-result strong { font-size: 15px; }
+.mobile-result small { color: #779080; font-size: 12px; }
+.mobile-more { margin: 12px 0 0; color: #708976; font-size: 12px; }
+.mobile-login-screen { display: grid; align-items: center; padding-bottom: 36px; }
+.mobile-login-screen .mobile-inner { padding: 30px 0; }
+.mobile-login-mark { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 22px; border-radius: 14px; background: #247b4d; color: white; font-size: 29px; }
+.mobile-login-screen h1 { font-size: 28px; }
+.mobile-login-screen p { margin: 9px 0 25px; color: #728979; font-size: 14px; }
+.mobile-login-form { display: grid; }
+.mobile-login-form input { margin-bottom: 18px; }
+.mobile-login-form .mobile-primary { margin-top: 6px; }
+@media (max-width: 360px) { .mobile-app { padding-right: 12px; padding-left: 12px; } .mobile-search, .mobile-scan, .mobile-detail, .mobile-work, .mobile-results { padding: 15px; } .mobile-section-title > span:not(.warehouse-status) { display: none; } }

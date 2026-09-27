@@ -1,0 +1,26 @@
+.live-work { max-width: 950px; margin: 0 auto; }
+.live-work-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+.live-device { display: grid; gap: 10px; padding: 15px 18px; margin-bottom: 12px; font-size: 13px; }
+.live-device > span { color: #64806b; }
+.live-device > div { display: flex; align-items: center; gap: 9px; }
+.live-device input, .live-work-card select, .live-manual input { min-height: 42px; padding: 8px 11px; border: 1px solid #cbded0; border-radius: 8px; background: white; }
+.live-work-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.live-work-card { min-width: 0; padding: 18px; }
+.live-work-card label { display: block; margin-bottom: 11px; font-weight: 800; font-size: 13px; }
+.live-work-card select { width: 100%; }
+.live-work-card p, .live-work-list p, .live-work-note { color: #728b79; font-size: 12px; line-height: 1.6; }
+.live-work-scan-head { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 10px; font-size: 13px; }
+.live-manual { display: flex; gap: 8px; }
+.live-manual input { min-width: 0; flex: 1; }
+.live-work-notice { margin: 13px 0; padding: 12px 14px; border-radius: 8px; background: #eaf4ec; color: #326f47; font-size: 13px; }
+.live-work-list { margin-top: 13px; padding: 18px; }
+.live-work-list h3 { margin: 0 0 9px; font-size: 14px; }
+.live-work-list > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid #e5eee6; }
+.live-work-list > div span { display: grid; gap: 4px; font-size: 13px; }
+.live-work-list > .live-work-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.live-work-item > button { grid-column: 2; grid-row: 1; }
+.live-return-fields { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.live-return-fields select, .live-return-fields input { min-height: 39px; min-width: 150px; flex: 1; padding: 7px; border: 1px solid #cbded0; border-radius: 7px; background: white; }
+.live-work-list small { color: #78917e; }
+.live-work-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+@media (max-width: 700px) { .live-work-grid { grid-template-columns: 1fr; } .live-device > div { flex-wrap: wrap; } .live-work-head { align-items: start; } }

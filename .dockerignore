@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!*.example
+frontend/node_modules
+frontend/dist
+frontend/*.png
+backend/__pycache__
+backend/**/__pycache__
+backend/.venv
+backend/*.sqlite3
+office-pilot-data/
+frontend/public/warehouse-pilot-ca.crt
+Aixq.md
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache

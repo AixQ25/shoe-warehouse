@@ -1,0 +1,9 @@
+.env
+.env.*
+!*.example
+**/__pycache__/
+**/*.pyc
+**/*.sqlite3
+office-pilot-data/
+frontend/public/warehouse-pilot-ca.crt
+Aixq.md

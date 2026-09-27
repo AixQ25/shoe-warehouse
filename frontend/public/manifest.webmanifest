@@ -1,0 +1,12 @@
+{
+  "name": "鞋模具仓库",
+  "short_name": "模具仓库",
+  "start_url": "/?page=work",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f1f5f0",
+  "theme_color": "#123247",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,27 @@
+.live-labels-page { max-width: 1100px; margin: 0 auto; }
+.live-label-controls { display: grid; justify-items: start; gap: 14px; padding: 22px; margin-bottom: 16px; }
+.live-label-controls > label, .live-label-size label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+.live-label-controls input:not([type='radio']) { min-height: 39px; width: min(320px, 100%); padding: 8px; border: 1px solid #cbded0; border-radius: 7px; }
+.live-label-size { display: flex; flex-wrap: wrap; gap: 15px; }
+.live-label-size input { width: 105px !important; }
+.live-label-purpose { display: flex; gap: 20px; font-size: 13px; }
+.live-label-purpose label { display: flex; align-items: center; gap: 5px; }
+.live-label-controls p { margin: 0; color: #657b70; font-size: 12px; }
+.label-print-sheet { display: flex; flex-wrap: wrap; align-items: start; gap: var(--label-gap); }
+.label-card { box-sizing: border-box; display: flex; align-items: center; width: var(--label-width); height: var(--label-height); padding: 2mm; overflow: hidden; border: 1px solid #b5c8be; background: white; color: #111; break-inside: avoid; }
+.label-qr { flex: 0 0 35%; }
+.label-qr svg { display: block; width: 100%; height: auto; }
+.label-text { min-width: 0; display: grid; gap: 2px; padding-left: 2mm; font-size: 9px; line-height: 1.25; overflow-wrap: anywhere; }
+.label-text strong { font-size: 12px; }
+.label-text b { font-size: 12px; }
+.live-label-records { display: grid; gap: 10px; margin-top: 20px; padding: 18px; }
+.live-label-records h3 { margin: 0; font-size: 15px; }
+.live-label-records > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 0; border-bottom: 1px solid #e4ece7; font-size: 12px; }
+.live-label-records span { color: #657b70; }
+@media print {
+  @page { margin: 4mm; }
+  body * { visibility: hidden !important; }
+  .label-print-sheet, .label-print-sheet * { visibility: visible !important; }
+  .label-print-sheet { position: absolute; inset: 0 auto auto 0; width: 100%; gap: var(--label-gap); }
+  .label-card { border: 0; outline: 1px solid #ddd; }
+}

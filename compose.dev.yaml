@@ -1,0 +1,47 @@
+name: mold-warehouse-dev
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: warehouse
+      POSTGRES_DB: warehouse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in a host-local env file}
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warehouse -d warehouse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.api
+    environment:
+      WAREHOUSE_ENV: development
+      COOKIE_SECURE: "0"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: warehouse
+      POSTGRES_DB: warehouse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in a host-local env file}
+    command: ["sh", "-c", "python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.web
+      args:
+        CADDYFILE: deployment/Caddyfile.dev
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_dev_data:

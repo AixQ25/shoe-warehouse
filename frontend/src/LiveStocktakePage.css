@@ -1,0 +1,34 @@
+.live-stocktake { max-width: 1100px; margin: 0 auto; }
+.live-stocktake-top { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 12px; }
+.live-stocktake-note { color: #738b78; font-size: 12px; line-height: 1.6; }
+.live-stocktake-create { display: flex; gap: 8px; padding: 14px; margin: 15px 0; }
+.live-stocktake-create select, .live-stocktake-scan input, .live-stocktake-actions input { min-height: 42px; padding: 8px 11px; border: 1px solid #cbded0; border-radius: 8px; background: white; }
+.live-stocktake-create select { flex: 1; min-width: 0; }
+.live-stocktake-layout { display: grid; grid-template-columns: 220px 1fr; gap: 14px; }
+.live-stocktake-list { align-self: start; display: grid; gap: 5px; padding: 15px; }
+.live-stocktake-list > strong { margin: 0 0 6px; font-size: 13px; }
+.live-stocktake-list button { display: grid; gap: 4px; padding: 10px; border: 1px solid #dce8de; border-radius: 8px; background: #f7faf7; text-align: left; }
+.live-stocktake-list button.active { border-color: #5ca774; background: #eaf7ed; }
+.live-stocktake-list button span { color: #77917b; font-size: 11px; }
+.live-stocktake-detail { min-width: 0; padding: 20px; }
+.live-stocktake-heading { display: flex; justify-content: space-between; align-items: start; gap: 9px; }
+.live-stocktake-heading h3 { margin: 0 0 4px; font-size: 18px; }
+.live-stocktake-heading span { color: #819785; font-size: 11px; }
+.live-stocktake-heading > b { color: #367e4f; font-size: 12px; }
+.live-stocktake-counts { display: flex; flex-wrap: wrap; gap: 15px; margin: 17px 0; padding: 11px 14px; border-radius: 8px; background: #eff7f0; font-size: 12px; font-weight: 700; }
+.live-stocktake-scan { margin-bottom: 17px; padding: 15px; border: 1px solid #deebe0; border-radius: 8px; }
+.live-stocktake-scan p { margin: 0 0 7px; font-size: 13px; }
+.live-stocktake-scan > div:last-child { display: flex; gap: 8px; margin-top: 8px; }
+.live-stocktake-scan input { flex: 1; min-width: 0; }
+.live-stocktake-expected { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
+.live-stocktake-expected h4, .live-stocktake-differences h4 { width: 100%; margin: 0 0 5px; font-size: 13px; }
+.live-stocktake-expected span { padding: 7px 9px; border-radius: 6px; background: #f4f5f3; color: #738677; font-size: 11px; }
+.live-stocktake-expected span.found { background: #e6f4e9; color: #2f774a; }
+.live-stocktake-differences { margin: 15px 0; }
+.live-stocktake-differences > div { display: flex; justify-content: space-between; gap: 9px; padding: 8px 0; border-bottom: 1px solid #e7eee8; font-size: 12px; }
+.live-stocktake-resolve { display: grid; gap: 9px; margin: 18px 0; padding: 14px; border: 1px solid #e7d7ac; border-radius: 8px; background: #fffaf0; }
+.live-stocktake-resolve h4 { margin: 0; font-size: 13px; }
+.live-stocktake-resolve input, .live-stocktake-resolve select { min-height: 40px; min-width: 0; padding: 7px 10px; border: 1px solid #dfd4bb; border-radius: 7px; background: white; }
+.live-stocktake-resolve > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #ede2c9; font-size: 12px; }
+.live-stocktake-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+@media (max-width: 750px) { .live-stocktake-layout { grid-template-columns: 1fr; } .live-stocktake-list { display: flex; overflow-x: auto; } .live-stocktake-list > strong { display: none; } .live-stocktake-list button { flex: 0 0 140px; } }

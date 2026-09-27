@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>鞋模具仓库 · 布局演示</title>
+  <style>
+    :root { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #19342e; background: #eef3f0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .topbar { height: 82px; display: flex; align-items: center; gap: 24px; padding: 0 28px; background: #fff; border-bottom: 1px solid #d9e5de; }
+    .brand { flex: 0 0 auto; display: flex; align-items: center; gap: 11px; font-size: 21px; font-weight: 800; white-space: nowrap; }
+    .brand-icon { display: grid; place-items: center; width: 37px; height: 37px; border-radius: 10px; background: #17654d; color: white; font-size: 23px; }
+    .search { display: flex; align-items: center; gap: 9px; max-width: 640px; min-width: 220px; flex: 1; height: 46px; padding: 4px 4px 4px 15px; border: 1px solid #cadbd0; border-radius: 11px; background: #f9fbfa; }
+    .search-symbol { color: #618475; font-size: 24px; line-height: 1; }
+    .search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 15px; color: #19342e; }
+    .search input::placeholder { color: #8ea59a; }
+    .search button { height: 36px; border: 0; border-radius: 8px; background: #197353; padding: 0 18px; color: white; font-weight: 700; white-space: nowrap; }
+    .top-right { margin-left: auto; display: flex; align-items: center; gap: 12px; white-space: nowrap; color: #658074; font-size: 12px; }
+    .demo-tag { color: #9a6116; background: #fff2d5; border: 1px solid #f0d699; padding: 5px 9px; border-radius: 6px; font-weight: 700; }
+    .map-shell { padding: 15px 20px 24px; }
+    .map-head { height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px; }
+    .map-head h1 { margin: 0; font-size: 17px; }
+    .zones { display: flex; gap: 5px; }
+    .zones button { border: 1px solid #d4e2d8; background: #fff; color: #376f54; border-radius: 7px; min-width: 37px; height: 29px; font-weight: 800; }
+    .zones button:hover { background: #dff2e6; border-color: #83bf9b; }
+    .map { margin-top: 10px; display: grid; gap: 13px; }
+    .zone-row { display: grid; grid-template-columns: 66px minmax(0, 1fr); min-width: 0; scroll-margin-top: 10px; }
+    .zone-label { display: flex; flex-direction: column; justify-content: center; align-items: center; background: #dce9df; border: 1px solid #c5d9c9; border-right: 0; border-radius: 10px 0 0 10px; color: #1c6045; }
+    .zone-letter { font-size: 27px; font-weight: 900; line-height: 1; }
+    .zone-label span:last-child { margin-top: 5px; font-size: 12px; font-weight: 700; }
+    .rack-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; min-width: 0; padding: 7px; border: 1px solid #c5d9c9; border-radius: 0 10px 10px 0; background: #e7eee8; }
+    .rack { min-width: 0; background: #f8faf7; border: 4px solid #247749; border-top-width: 6px; border-bottom-width: 6px; border-radius: 3px; box-shadow: inset 0 0 0 1px #69a877; }
+    .rack-title { height: 25px; display: grid; place-items: center; background: #1f6847; color: white; font-size: 12px; font-weight: 800; }
+    .level { width: 100%; height: 58px; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 4px 5px; border: 0; border-top: 5px solid #2c8450; border-radius: 0; background: #fcfdfb; text-align: left; color: #183d30; }
+    .level:first-of-type { border-top-width: 3px; }
+    .level:hover { background: #e7f8e9; }
+    .level:focus-visible { outline: 3px solid #eaa746; outline-offset: -4px; }
+    .level.match { background: #fff4d8; box-shadow: inset 0 0 0 3px #e3a436; }
+    .level.dim { opacity: .32; }
+    .level-number { width: 16px; flex: 0 0 16px; color: #5b8568; font-weight: 800; font-size: 12px; text-align: center; }
+    .level-content { min-width: 0; flex: 1; }
+    .item-line { display: flex; align-items: baseline; justify-content: space-between; min-width: 0; gap: 3px; }
+    .item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 800; }
+    .item-count { flex: 0 0 auto; color: #5a816c; font-size: 10px; font-weight: 700; }
+    .molds { display: flex; gap: 3px; height: 20px; margin-top: 4px; overflow: hidden; align-items: end; }
+    .mold { width: 10px; min-width: 7px; max-width: 11px; height: 15px; flex: 1; position: relative; border: 1px solid #65837a; border-radius: 2px 2px 1px 1px; background: linear-gradient(135deg, #879b91, #d0d9d1 48%, #697f73); transform: skewY(-4deg); }
+    .mold::before { content: ""; position: absolute; width: 45%; height: 4px; left: 25%; top: -4px; border: 1px solid #758679; border-bottom: 0; border-radius: 3px 3px 0 0; }
+    .mold.missing { background: transparent; border: 1px dashed #b8c8bc; }
+    .mold.missing::before { display: none; }
+    .empty { font-size: 12px; color: #a4b6a7; }
+    .not-found { display: none; padding: 10px 14px; margin: 10px 0 0 66px; background: #fff3e1; border: 1px solid #eed3a6; border-radius: 8px; color: #8d5c18; font-size: 13px; }
+    .not-found.visible { display: block; }
+    dialog { width: min(650px, calc(100vw - 30px)); max-height: min(85vh, 780px); padding: 0; border: 0; border-radius: 15px; background: white; box-shadow: 0 24px 80px #092b1b55; color: #1d382b; }
+    dialog::backdrop { background: #102d20a8; }
+    .dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 21px 25px; border-bottom: 1px solid #e2ebe3; }
+    .dialog-head strong { font-size: 21px; }
+    .close { border: 0; background: #eef4ef; border-radius: 7px; width: 34px; height: 34px; color: #506b59; font-size: 21px; line-height: 1; }
+    .dialog-body { padding: 21px 25px 27px; overflow: auto; max-height: calc(85vh - 77px); }
+    .location { padding: 10px 13px; border-radius: 8px; background: #eaf5ec; color: #2c6743; font-weight: 700; }
+    .set-heading { display: flex; justify-content: space-between; gap: 12px; margin: 20px 0 12px; font-size: 15px; font-weight: 800; }
+    .set-heading span:last-child { color: #5c8469; font-size: 12px; font-weight: 600; }
+    .size-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
+    .size { padding: 10px 3px; border: 1px solid #cce3d1; border-radius: 7px; text-align: center; background: #edf8ef; color: #277447; }
+    .size.out { border-color: #d8e2e6; background: #f0f4f6; color: #6c8390; }
+    .size b { display: block; font-size: 15px; }
+    .size span { font-size: 11px; }
+    .map-shell { padding: 18px 24px 26px; }
+    .workspace { display: grid; grid-template-columns: 210px minmax(0,1fr); gap: 18px; align-items: start; }
+    .overview, .selected { background: #fff; border: 1px solid #d5e2d8; border-radius: 12px; }
+    .overview { padding: 15px; }
+    .overview h2 { margin: 0 0 12px; font-size: 15px; }
+    .zone-mini { display: grid; gap: 5px; }
+    .zone-mini button { width: 100%; height: 43px; display: flex; align-items: center; gap: 10px; border: 1px solid #d8e6db; border-radius: 7px; background: #f5f9f5; padding: 0 9px; color: #2f684a; text-align: left; }
+    .zone-mini button.active { border-color: #2d8a54; background: #e0f2e4; box-shadow: inset 3px 0 #25824a; }
+    .zone-mini button.match { border-color: #e5ab48; background: #fff2d4; }
+    .zone-mini button strong { font-size: 17px; width: 19px; }
+    .mini-racks { display: flex; flex: 1; gap: 3px; }
+    .mini-racks i { height: 17px; flex: 1; border: 2px solid #419064; border-radius: 2px; background: #e8f3e8; }
+    .selected { min-width: 0; padding: 17px; }
+    .selected .map-head { height: auto; min-height: 30px; }
+    .selected .map-head h1 { font-size: 19px; }
+    .selected .map { gap: 0; margin-top: 14px; }
+    .selected .zone-row { display: block; }
+    .selected .rack-strip { border-radius: 8px; gap: 5px; padding: 9px; }
+    .selected .rack { border-width: 5px; border-top-width: 8px; border-bottom-width: 8px; }
+    .selected .rack-title { height: 34px; font-size: 14px; }
+    .selected .level { height: clamp(88px, 11vh, 130px); padding: 8px; align-items: center; }
+    .selected .level-number { font-size: 15px; width: 22px; flex-basis: 22px; }
+    .selected .item-name { font-size: clamp(13px, 1vw, 17px); }
+    .selected .item-count { font-size: 12px; }
+    .selected .molds { height: 32px; margin-top: 9px; gap: 4px; }
+    .selected .mold { height: 24px; max-width: 18px; }
+    .selected .mold::before { height: 6px; top: -6px; }
+    .selected .empty { font-size: 14px; }
+    .search-result { color: #9a641a; font-size: 13px; font-weight: 700; }
+    @media (max-width: 1000px) {
+      .topbar { flex-wrap: wrap; height: auto; padding: 13px 16px; gap: 11px; }
+      .brand { font-size: 17px; }
+      .search { order: 3; flex-basis: 100%; max-width: none; }
+      .map-shell { padding: 12px 10px 20px; }
+      .workspace { grid-template-columns: 1fr; gap: 10px; }
+      .overview { padding: 10px; }
+      .overview h2 { display: none; }
+      .zone-mini { grid-template-columns: repeat(5,1fr); }
+      .zone-mini button { justify-content: center; }
+      .mini-racks { display: none; }
+      .selected { overflow-x: auto; }
+      .selected .map, .selected .map-head { min-width: 790px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-icon">▥</span><span>鞋模具仓库</span></div>
+    <div class="search" role="search">
+      <span class="search-symbol" aria-hidden="true">⌕</span>
+      <input id="search-input" type="search" aria-label="搜索模具" placeholder="搜索模具名称、型号、套号或编号" autocomplete="off">
+      <button id="search-button" type="button">定位</button>
+    </div>
+    <div class="top-right"><span class="demo-tag">演示数据</span><span id="page-time"></span></div>
+  </header>
+  <main class="map-shell">
+    <div class="workspace">
+      <aside class="overview" aria-label="全仓区域"><h2>全仓区域</h2><nav id="zone-buttons" class="zone-mini" aria-label="选择区域"></nav></aside>
+      <section class="selected" aria-label="区域货架">
+        <div class="map-head"><h1 id="area-title">A 区货架</h1><span id="search-result" class="search-result"></span></div>
+        <div id="not-found" class="not-found" role="status">没有找到匹配的模具</div>
+        <div id="map" class="map"></div>
+      </section>
+    </div>
+  </main>
+  <dialog id="details" aria-label="库位详情"><div class="dialog-head"><strong id="dialog-title"></strong><button id="close-dialog" class="close" type="button" aria-label="关闭详情">×</button></div><div id="dialog-body" class="dialog-body"></div></dialog>
+
+  <script>
+    "use strict";
+    // 仅用于页面布局演示。区域、货架数、层内内容不是现场实测数据。
+    const areas = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
+    const names = ["飞跃运动底", "轻云休闲底", "山峰训练底", "海风凉鞋底", "远途工作底", "星河跑鞋底", "远航童鞋底", "晨光休闲底", "逐风运动底", "云雀训练底", "磐石工作底", "踏浪凉鞋底"];
+    const modelCodes = ["XM-028", "XM-014", "XM-031", "XM-043", "XM-051", "XM-062", "XM-074", "XM-086", "XM-093", "XM-105", "XM-116", "XM-128"];
+    const sizes = ["36", "37", "38", "39", "40", "41", "42", "43", "44", "45"];
+    const slots = [];
+    areas.forEach((area, areaIndex) => {
+      for (let rack = 1; rack <= 5; rack++) {
+        for (const level of [3, 2, 1]) {
+          const serial = areaIndex * 15 + (rack - 1) * 3 + (3 - level);
+          const vacant = [9, 17, 26, 34, 43, 52].includes(serial);
+          const nameIndex = serial % names.length;
+          const inStock = vacant ? 0 : [10, 10, 8, 10, 7, 10, 9, 10][serial % 8];
+          slots.push({ area, rack, level, name: vacant ? "" : names[nameIndex], model: vacant ? "" : modelCodes[nameIndex], set: vacant ? "" : `SET-${String(serial + 1).padStart(3, "0")}`, firstMold: serial * 10 + 1, inStock });
+        }
+      }
+    });
+    const byId = id => document.getElementById(id);
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[character]));
+    const locationCode = slot => `${slot.area}-${String(slot.rack).padStart(2, "0")}-${slot.level}`;
+    const moldCode = (slot, index) => `M-${String(slot.firstMold + index).padStart(6, "0")}`;
+    let query = "";
+    let selectedArea = "A";
+
+    function matches(slot) {
+      if (!query || !slot.name) return false;
+      return [slot.name, slot.model, slot.set, locationCode(slot), ...sizes.map((_, index) => moldCode(slot, index))].some(value => value.toUpperCase().includes(query));
+    }
+
+    function renderLevel(slot) {
+      const className = query ? (matches(slot) ? " match" : " dim") : "";
+      const id = locationCode(slot);
+      const figures = slot.name ? `<div class="molds" aria-hidden="true">${Array.from({length: 10}, (_, index) => `<i class="mold${index >= slot.inStock ? " missing" : ""}"></i>`).join("")}</div>` : "";
+      const content = slot.name ? `<div class="level-content"><div class="item-line"><span class="item-name">${escapeHtml(slot.name)}</span><span class="item-count">${slot.inStock}/10</span></div>${figures}</div>` : '<span class="empty">空层</span>';
+      return `<button type="button" class="level${className}" data-slot="${id}" aria-label="${id} ${slot.name || "空层"}"><span class="level-number">${slot.level}</span>${content}</button>`;
+    }
+
+    function renderMap() {
+      const area = selectedArea;
+      byId("area-title").textContent = `${area} 区货架`;
+      byId("map").innerHTML = `<div class="zone-row" id="zone-${area}"><div class="rack-strip">${Array.from({length: 5}, (_, rackIndex) => { const rack = rackIndex + 1; const levels = [3, 2, 1].map(level => slots.find(slot => slot.area === area && slot.rack === rack && slot.level === level)); return `<div class="rack"><div class="rack-title">${area}-${String(rack).padStart(2, "0")}</div>${levels.map(renderLevel).join("")}</div>`; }).join("")}</div></div>`;
+      byId("not-found").classList.toggle("visible", Boolean(query) && !slots.some(matches));
+      byId("zone-buttons").innerHTML = areas.map(item => `<button type="button" class="${item === area ? "active" : ""}${query && slots.some(slot => slot.area === item && matches(slot)) ? " match" : ""}" data-area="${item}" aria-label="查看${item}区" aria-current="${item === area ? "true" : "false"}"><strong>${item}</strong><span class="mini-racks" aria-hidden="true">${"<i></i>".repeat(5)}</span></button>`).join("");
+    }
+
+    function openSlot(code) {
+      const slot = slots.find(item => locationCode(item) === code);
+      if (!slot) return;
+      byId("dialog-title").textContent = `${slot.area}区 · ${slot.rack}号货架 · ${slot.level}层`;
+      if (!slot.name) {
+        byId("dialog-body").innerHTML = '<div class="location">当前没有登记模具</div>';
+      } else {
+        const sizesHtml = sizes.map((size, index) => `<div class="size${index >= slot.inStock ? " out" : ""}" title="${moldCode(slot, index)}"><b>${size}</b><span>${index < slot.inStock ? "在库" : "已领用"}</span></div>`).join("");
+        byId("dialog-body").innerHTML = `<div class="location">库位编号：${code}</div><div class="set-heading"><span>${escapeHtml(slot.name)} · ${slot.model}</span><span>${slot.inStock}/10 在库</span></div><div>套号：${slot.set}</div><div class="set-heading"><span>尺码状态</span></div><div class="size-grid">${sizesHtml}</div>`;
+      }
+      byId("details").showModal();
+    }
+
+    function search(scrollToResult) {
+      query = byId("search-input").value.trim().toUpperCase();
+      const first = query ? slots.find(matches) : null;
+      byId("search-result").textContent = first ? `位置：${first.area} 区 · ${first.rack} 号货架 · ${first.level} 层` : "";
+      if (scrollToResult && first) selectedArea = first.area;
+      renderMap();
+      if (scrollToResult && first) byId("map").querySelector(`[data-slot="${locationCode(first)}"]`).scrollIntoView({behavior: "smooth", block: "center", inline: "center"});
+    }
+
+    byId("map").addEventListener("click", event => { const button = event.target.closest("button[data-slot]"); if (button) openSlot(button.dataset.slot); });
+    byId("zone-buttons").addEventListener("click", event => { const button = event.target.closest("button[data-area]"); if (button) { selectedArea = button.dataset.area; renderMap(); } });
+    byId("search-input").addEventListener("input", () => search(false));
+    byId("search-input").addEventListener("keydown", event => { if (event.key === "Enter") search(true); });
+    byId("search-button").addEventListener("click", () => search(true));
+    byId("close-dialog").addEventListener("click", () => byId("details").close());
+    byId("details").addEventListener("click", event => { if (event.target === byId("details")) byId("details").close(); });
+    byId("page-time").textContent = new Date().toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit"});
+    renderMap();
+  </script>
+</body>
+</html>

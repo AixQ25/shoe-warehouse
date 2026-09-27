@@ -1,0 +1,4 @@
+.live-mold-action-panel { display: grid; gap: 10px; padding-top: 4px; }
+.live-mold-action-panel h3 { margin: 0 0 3px; }
+.live-mold-action-panel p { margin: 0; color: #7b8f7e; font-size: 12px; line-height: 1.6; }
+.live-mold-action-panel select, .live-mold-action-panel textarea { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid #cfdfd2; border-radius: 8px; background: white; color: #294b34; font: inherit; font-size: 13px; }

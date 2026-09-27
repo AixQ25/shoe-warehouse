@@ -1,0 +1,17 @@
+.live-management { display: grid; gap: 16px; }
+.management-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.management-card, .management-list { padding: 20px; }
+.management-card { display: grid; align-content: start; gap: 12px; }
+.management-card h2, .management-list h2 { margin-bottom: 4px; font-size: 17px; }
+.management-card label { display: grid; gap: 5px; font-size: 12px; font-weight: 700; }
+.management-card input, .management-card select { width: 100%; min-height: 40px; padding: 7px 10px; border: 1px solid #cbded0; border-radius: 7px; background: #fff; }
+.management-card .primary-button { justify-self: start; }
+.management-card p, .management-list p { margin: 0; color: #6b8272; font-size: 12px; line-height: 1.5; }
+.management-inline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.management-set-list { display: grid; margin-top: 14px; max-height: 450px; overflow: auto; }
+.management-set-list > div { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 14px; min-height: 42px; padding: 8px 0; border-top: 1px solid #e6eee8; font-size: 12px; }
+.management-set-list strong { color: #284d39; }
+.management-set-list span { color: #6b8272; }
+.management-set-list button { margin-left: auto; padding: 5px 12px; border: 1px solid #bed2c4; border-radius: 6px; background: #f3f8f4; color: #286541; }
+.management-reason { display: grid; gap: 5px; max-width: 320px; margin-top: 14px; font-size: 12px; font-weight: 700; }
+.management-reason input { min-height: 40px; padding: 7px 10px; border: 1px solid #cbded0; border-radius: 7px; background: #fff; }

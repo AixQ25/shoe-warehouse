@@ -1,0 +1,62 @@
+name: mold-warehouse
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: warehouse
+      POSTGRES_DB: warehouse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in a host-local env file}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warehouse -d warehouse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      WAREHOUSE_ENV: production
+      COOKIE_SECURE: "1"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: warehouse
+      POSTGRES_DB: warehouse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in a host-local env file}
+    command: ["sh", "-c", "python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      WAREHOUSE_HOST: ${WAREHOUSE_HOST:?set WAREHOUSE_HOST in a host-local env file}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

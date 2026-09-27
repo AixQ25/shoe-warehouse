@@ -1,0 +1,8 @@
+.warehouse-tools-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.warehouse-tool-card { display: flex; flex-direction: column; align-items: start; min-height: 245px; padding: 22px; }
+.warehouse-tool-icon { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 18px; border-radius: 9px; background: #e7f3e9; color: #237249; font-size: 21px; }
+.warehouse-tool-card h2 { font-size: 18px; }
+.warehouse-tool-card p { margin: 11px 0 5px; color: #315b41; font-size: 14px; font-weight: 700; }
+.warehouse-tool-card small { color: #718875; font-size: 12px; line-height: 1.6; }
+.warehouse-tool-card button { margin-top: auto; }
+@media (max-width: 1050px) { .warehouse-tools-grid { grid-template-columns: 1fr; } .warehouse-tool-card { min-height: 0; gap: 7px; } .warehouse-tool-icon { margin-bottom: 8px; } .warehouse-tool-card button { margin-top: 13px; } }
