@@ -13,5 +13,10 @@
 .management-set-list strong { color: #284d39; }
 .management-set-list span { color: #6b8272; }
 .management-set-list button { margin-left: auto; padding: 5px 12px; border: 1px solid #bed2c4; border-radius: 6px; background: #f3f8f4; color: #286541; }
+.management-row-actions { display: flex; gap: 6px; margin-left: auto; }
+.management-set-list .management-row-actions button { margin-left: 0; }
+.management-search { width: min(100%, 360px); min-height: 40px; margin-top: 14px; padding: 7px 10px; border: 1px solid #cbded0; border-radius: 7px; background: white; }
+.management-set-list .management-delete { border-color: #e3c7c2; background: #fff5f3; color: #a33b2d; }
+.management-set-list button:disabled { opacity: .5; cursor: not-allowed; }
 .management-reason { display: grid; gap: 5px; max-width: 320px; margin-top: 14px; font-size: 12px; font-weight: 700; }
 .management-reason input { min-height: 40px; padding: 7px 10px; border: 1px solid #cbded0; border-radius: 7px; background: #fff; }

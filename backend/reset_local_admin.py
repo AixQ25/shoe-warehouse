@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 from app.auth import hash_password, verify_password
+from app.console_input import read_password
 from pilot_storage import backup_database, inspect_database
 
 
@@ -19,8 +19,8 @@ def main() -> None:
     args = parser.parse_args()
     database = args.database.resolve()
     inspect_database(database)
-    new_password = getpass.getpass("请输入新的 admin 密码（至少 12 个字符）：")
-    confirm = getpass.getpass("再输入一次：")
+    new_password = read_password("请输入新的 admin 密码（至少 12 个字符，输入时显示 *）：")
+    confirm = read_password("再输入一次（输入时显示 *）：")
     if len(new_password) < 12 or new_password != confirm:
         raise SystemExit("密码不足 12 个字符或两次输入不一致；数据库未修改")
     saved = backup_database(database, args.backup_directory)

@@ -8,12 +8,12 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .database import make_session_factory
-from .models import AuditLog, AuthorizedDevice, LoginSession, Person, User, utc_now
+from .models import AuditLog, AuthorizedDevice, ImportBatch, LabelPrintBatch, LoginSession, Operation, Person, StocktakeScan, StocktakeSession, User, utc_now
 
 SESSION_COOKIE = "warehouse_session"
 DEVICE_COOKIE = "warehouse_device"
@@ -194,6 +194,39 @@ def create_user(payload: UserInput, context: AuthContext = Depends(require_csrf)
     return {"id": user.id, "username": user.username, "role": user.role, "person_id": user.person_id, "active": True}
 
 
+@auth_router.delete("/users/{user_id}")
+def delete_user(user_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    if user_id == context.user.id:
+        raise api_error(409, "CANNOT_DELETE_SELF", "不能删除当前登录的维护员账号")
+    user = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if user is None:
+        raise api_error(404, "USER_NOT_FOUND", "账号不存在")
+    references = (
+        (Operation, Operation.actor_user_id == user_id),
+        (StocktakeSession, or_(StocktakeSession.created_by_user_id == user_id, StocktakeSession.location_verified_by_user_id == user_id, StocktakeSession.closed_by_user_id == user_id)),
+        (StocktakeScan, StocktakeScan.scanned_by_user_id == user_id),
+        (ImportBatch, ImportBatch.created_by_user_id == user_id),
+        (LabelPrintBatch, LabelPrintBatch.actor_user_id == user_id),
+        (AuditLog, AuditLog.actor_user_id == user_id),
+    )
+    if any(db.scalar(select(model.id).where(condition).limit(1)) is not None for model, condition in references):
+        raise api_error(409, "USER_IN_USE", "账号已有业务记录，不能删除；可停用账号")
+    username = user.username
+    for login in db.scalars(select(LoginSession).where(LoginSession.user_id == user_id)).all():
+        db.delete(login)
+    for device in db.scalars(select(AuthorizedDevice).where(AuthorizedDevice.user_id == user_id)).all():
+        db.delete(device)
+    db.delete(user)
+    db.add(AuditLog(actor_user_id=context.user.id, action="USER_DELETE", entity=str(user_id), before=username))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise api_error(409, "USER_IN_USE", "账号已被业务记录引用，不能删除") from None
+    return {"id": user_id, "username": username}
+
+
 @auth_router.patch("/users/{user_id}/active")
 def set_user_active(user_id: int, payload: UserActiveInput, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
     require_admin(context)
@@ -295,3 +328,22 @@ def revoke_device(device_id: int, context: AuthContext = Depends(require_csrf), 
     device.revoked_at = utc_now()
     db.commit()
     return {"id": device.id, "authorized": False}
+
+
+@device_router.delete("/{device_id}")
+def delete_device(device_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    device = db.scalar(select(AuthorizedDevice).where(AuthorizedDevice.id == device_id).with_for_update())
+    if device is None:
+        raise api_error(404, "DEVICE_NOT_FOUND", "设备不存在")
+    if db.scalar(select(Operation.id).where(Operation.device_id == device_id).limit(1)) is not None:
+        raise api_error(409, "DEVICE_IN_USE", "设备已有流转记录，不能删除；可撤销授权")
+    label = device.label
+    db.delete(device)
+    db.add(AuditLog(actor_user_id=context.user.id, action="DEVICE_DELETE", entity=str(device_id), before=label))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise api_error(409, "DEVICE_IN_USE", "设备已被业务记录引用，不能删除") from None
+    return {"id": device_id, "label": label}

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>鞋模具仓库 · 手机界面方案</title>
+  <style>
+    :root { font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; color: #182a24; background: #ebf0ed; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(circle at 5% 0%, #f7fbf4, transparent 35%), #ebf0ed; }
+    button, select { font: inherit; }
+    button { cursor: pointer; }
+    .page { max-width: 1570px; margin: auto; padding: 42px 30px 76px; }
+    .page-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 30px; }
+    .eyebrow { margin: 0 0 9px; color: #3a8a63; letter-spacing: .2em; font-size: 12px; font-weight: 800; }
+    h1 { margin: 0; font-size: clamp(29px, 3vw, 42px); line-height: 1.2; letter-spacing: -.04em; }
+    .intro { max-width: 720px; margin: 12px 0 0; color: #65746d; font-size: 14px; line-height: 1.8; }
+    .demo-note { flex: 0 0 auto; background: #fff; border: 1px solid #d7e1da; border-radius: 13px; padding: 12px 15px; color: #587262; font-size: 13px; box-shadow: 0 6px 28px #254f3110; }
+    .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; align-items: start; }
+    .option { min-width: 0; border: 1px solid #dbe5df; background: #fbfdfb; border-radius: 24px; padding: 20px; box-shadow: 0 15px 42px #2642350e; transition: border-color .2s, transform .2s; }
+    .option.chosen { border-color: #348c64; transform: translateY(-3px); box-shadow: 0 18px 45px #17694325; }
+    .option-head { min-height: 97px; display: flex; align-items: start; justify-content: space-between; gap: 13px; }
+    .option-code { color: #508d66; font-size: 12px; font-weight: 900; letter-spacing: .13em; }
+    .option h2 { font-size: 20px; margin: 5px 0 4px; }
+    .option-desc { margin: 0; color: #75837b; font-size: 12px; line-height: 1.55; }
+    .choose { white-space: nowrap; border: 1px solid #cbd9d0; background: #fff; color: #38694d; border-radius: 10px; padding: 8px 11px; font-size: 12px; font-weight: 700; }
+    .chosen .choose { color: #fff; background: #257a50; border-color: #257a50; }
+    .phone { position: relative; overflow: hidden; border-radius: 29px; border: 7px solid #17241e; min-height: 750px; background: #fff; box-shadow: 0 16px 33px #203d2c2b; }
+    .phone::before { content: ""; position: absolute; z-index: 5; top: 0; left: 50%; transform: translateX(-50%); width: 79px; height: 16px; border-radius: 0 0 12px 12px; background: #17241e; }
+    .phone-inner { min-height: 736px; display: flex; flex-direction: column; }
+    .app-top { padding: 36px 22px 17px; }
+    .app-brand { margin: 0; font-size: 11px; font-weight: 800; letter-spacing: .14em; opacity: .68; }
+    .app-top h3 { margin: 8px 0 0; font-size: 27px; letter-spacing: -.04em; line-height: 1.18; }
+    .app-top p:last-child { margin: 9px 0 0; font-size: 12px; opacity: .65; }
+    .app-body { padding: 17px 19px 22px; flex: 1; display: flex; flex-direction: column; gap: 15px; }
+    .home-label, .section-title, .tiny-label { font-size: 12px; letter-spacing: .08em; font-weight: 800; }
+    .home-label { opacity: .65; margin-top: 5px; }
+    .home-action { width: 100%; min-height: 136px; border: 0; border-radius: 19px; display: flex; align-items: center; justify-content: space-between; padding: 20px; text-align: left; transition: transform .15s; }
+    .home-action:hover, .scan-trigger:hover { transform: translateY(-2px); }
+    .home-action strong { display: block; font-size: 30px; line-height: 1.2; }
+    .home-action small { display: block; margin-top: 8px; font-size: 13px; opacity: .72; }
+    .action-arrow { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; border: 1px solid currentColor; font-size: 21px; flex: 0 0 auto; }
+    .home-foot { margin-top: auto; border-top: 1px solid currentColor; opacity: .53; padding-top: 16px; font-size: 12px; line-height: 1.6; }
+    .back { border: 0; padding: 0; background: none; color: inherit; font-weight: 750; font-size: 12px; }
+    .work-top { padding-top: 30px; }
+    .stage { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .stage h4 { margin: 0; font-size: 21px; letter-spacing: -.03em; }
+    .stage-count { border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+    .scan-frame { position: relative; min-height: 212px; border-radius: 19px; display: flex; align-items: center; flex-direction: column; justify-content: center; overflow: hidden; }
+    .scan-frame::before, .scan-frame::after { content: ""; position: absolute; left: 20%; right: 20%; height: 2px; border-radius: 4px; }
+    .scan-frame::before { top: 26%; }
+    .scan-frame::after { bottom: 26%; }
+    .scan-mark { width: 78px; height: 78px; display: grid; place-items: center; opacity: .9; }
+    .scan-mark svg { width: 70px; height: 70px; }
+    .scan-frame p { margin: 8px 0 0; font-size: 12px; font-weight: 700; }
+    .scan-trigger { width: 100%; min-height: 47px; border: 0; border-radius: 12px; font-weight: 850; font-size: 14px; transition: transform .15s; }
+    .shelf-banner { display: flex; align-items: center; justify-content: space-between; padding: 12px 13px; border-radius: 13px; gap: 8px; }
+    .shelf-banner strong { display: block; font-size: 15px; }
+    .shelf-banner small { display: block; font-size: 11px; opacity: .67; }
+    .shelf-banner button { border: 0; background: none; color: inherit; text-decoration: underline; font-size: 11px; font-weight: 800; flex: 0 0 auto; }
+    .section-line { display: flex; justify-content: space-between; align-items: baseline; }
+    .section-line h4 { margin: 0; font-size: 15px; }
+    .section-line span { font-size: 12px; opacity: .65; }
+    .items { min-height: 80px; border-radius: 13px; overflow: hidden; }
+    .empty { padding: 20px 12px; font-size: 12px; text-align: center; opacity: .57; }
+    .item { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 59px; padding: 10px 12px; border-bottom: 1px solid currentColor; }
+    .item:last-child { border-bottom: 0; }
+    .item strong { display: block; font-size: 14px; }
+    .item small { display: block; margin-top: 3px; font-size: 11px; opacity: .57; }
+    .item button { width: 29px; height: 29px; flex: 0 0 auto; border-radius: 8px; border: 0; font-size: 18px; line-height: 1; }
+    .bottom-action { margin-top: auto; padding-top: 8px; }
+    .bottom-action button { width: 100%; height: 49px; border: 0; border-radius: 12px; font-size: 15px; font-weight: 900; }
+    .bottom-action button:disabled { opacity: .37; cursor: not-allowed; }
+    .bottom-action p { text-align: center; margin: 8px 0 0; font-size: 10px; opacity: .55; }
+    .toast { position: absolute; z-index: 9; left: 16px; right: 16px; bottom: 16px; border-radius: 11px; padding: 12px; color: white; background: #243b2e; font-size: 12px; box-shadow: 0 10px 30px #0005; }
+    .modal-shade { position: absolute; z-index: 8; inset: 0; background: #0b1b17a9; display: flex; align-items: end; }
+    .modal { width: 100%; background: #fff; border-radius: 23px 23px 0 0; padding: 25px 21px 30px; color: #1d3025; }
+    .modal h4 { margin: 0 0 6px; font-size: 20px; }
+    .modal p { margin: 0 0 18px; color: #74837a; font-size: 12px; }
+    .modal select { display: block; width: 100%; padding: 13px; border: 1px solid #cad9cf; border-radius: 10px; background: #fff; color: #1d3025; }
+    .modal-actions { display: flex; gap: 9px; margin-top: 13px; }
+    .modal-actions button { flex: 1; min-height: 43px; border-radius: 10px; border: 1px solid #cbd8d0; background: #fff; color: #234331; font-weight: 800; }
+    .modal-actions button:last-child { background: #277a52; color: #fff; border-color: #277a52; }
+
+    .variant-a .phone-inner { background: #f6f9f5; color: #183f2c; }
+    .variant-a .app-top { color: #fff; background: #176344; border-radius: 0 0 27px 27px; }
+    .variant-a .home-action.issue { color: #fff; background: #25835b; }
+    .variant-a .home-action.return { color: #1a5b3d; background: #e1efe4; border: 1px solid #c4dec9; }
+    .variant-a .stage-count { color: #1e774e; background: #deefe2; }
+    .variant-a .scan-frame { background: #e3eee5; border: 1px solid #c3dec9; color: #36865a; }
+    .variant-a .scan-frame::before, .variant-a .scan-frame::after { background: #75b58c; opacity: .4; }
+    .variant-a .scan-trigger, .variant-a .bottom-action button { color: #fff; background: #247e55; }
+    .variant-a .shelf-banner { background: #deefe3; color: #1c6a47; }
+    .variant-a .items { background: #fff; border: 1px solid #e0eae2; }
+    .variant-a .item { border-color: #edf1ee; }
+    .variant-a .item button { background: #eff5f0; color: #728977; }
+
+    .variant-b .phone { border-color: #15211e; }
+    .variant-b .phone-inner { background: #f7f7f0; color: #172521; }
+    .variant-b .app-top { color: #f5fff3; background: #172b25; }
+    .variant-b .app-top h3 { font-size: 32px; }
+    .variant-b .home-action { border-radius: 8px; min-height: 150px; }
+    .variant-b .home-action.issue { color: #172521; background: #d8f267; }
+    .variant-b .home-action.return { color: #fff; background: #264638; }
+    .variant-b .stage-count { color: #233628; background: #def26f; border-radius: 4px; }
+    .variant-b .scan-frame { border: 2px dashed #5d7766; border-radius: 7px; background: #ebeee3; color: #263f31; }
+    .variant-b .scan-frame::before, .variant-b .scan-frame::after { background: #8aa583; opacity: .45; }
+    .variant-b .scan-trigger, .variant-b .bottom-action button { color: #172521; background: #d8f267; border-radius: 7px; }
+    .variant-b .shelf-banner { background: #e0e9c1; color: #294028; border-radius: 5px; }
+    .variant-b .items { background: #fff; border: 1px solid #cfd5c6; border-radius: 5px; }
+    .variant-b .item { border-color: #e4e7dc; }
+    .variant-b .item button { background: #edf0e6; color: #394f3c; border-radius: 3px; }
+
+    .variant-c .phone-inner { background: #fff; color: #193b4b; }
+    .variant-c .app-top { background: #e8f1f5; color: #164d63; border-bottom: 1px solid #d4e5eb; }
+    .variant-c .home-action { border-radius: 17px; min-height: 118px; }
+    .variant-c .home-action.issue { color: #fff; background: #1f718e; }
+    .variant-c .home-action.return { color: #225c72; background: #edf5f7; border: 1px solid #cddfe5; }
+    .variant-c .stage-count { color: #176782; background: #e0f0f4; }
+    .variant-c .scan-frame { color: #2b7890; background: #f3f8fa; border: 1px solid #c9e0e8; }
+    .variant-c .scan-frame::before, .variant-c .scan-frame::after { background: #95c9d4; opacity: .6; }
+    .variant-c .scan-trigger, .variant-c .bottom-action button { color: #fff; background: #1d718e; }
+    .variant-c .shelf-banner { color: #1f667f; background: #e7f2f5; }
+    .variant-c .items { border-top: 1px solid #d3e3e9; border-bottom: 1px solid #d3e3e9; }
+    .variant-c .item { border-color: #e7f0f2; }
+    .variant-c .item button { background: #eaf3f6; color: #478095; }
+
+    @media (max-width: 1180px) { .options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 770px) { .page { padding: 26px 14px 50px; } .page-head { display: block; } .demo-note { display: inline-block; margin-top: 17px; } .options { grid-template-columns: 1fr; max-width: 430px; margin: auto; } .option { padding: 14px; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <div>
+        <p class="eyebrow">ANDROID APP / UI 选择稿</p>
+        <h1>两个入口，进入后立刻扫码。</h1>
+        <p class="intro">三套界面使用相同流程，只比较视觉样式。点手机里的按钮可以模拟扫码：领取直接扫模具；归还先扫库位，再扫模具。每件模具都会在下方单独占一行。</p>
+      </div>
+      <div class="demo-note">交互原型 · 不调用服务器 · 不修改库存</div>
+    </header>
+    <section class="options" id="options" aria-label="三种界面方案"></section>
+  </main>
+  <script>
+    const variants = [
+      { id: 'a', code: 'A / 清爽卡片', title: '柔和清晰', description: '浅绿、圆角、大按钮；适合长期日常使用。' },
+      { id: 'b', code: 'B / 高对比', title: '现场醒目', description: '深色与亮色对比；站在货架前也容易看清。' },
+      { id: 'c', code: 'C / 简洁表格', title: '克制紧凑', description: '蓝白、信息规整；清单更像工作台。' }
+    ];
+    const sampleMolds = [
+      { code: 'M-00128', detail: '跑鞋A款 · 38码' },
+      { code: 'M-00136', detail: '跑鞋A款 · 39码' },
+      { code: 'M-00152', detail: '跑鞋B款 · 40码' },
+      { code: 'M-00163', detail: '跑鞋B款 · 41码' }
+    ];
+    const states = Object.fromEntries(variants.map(v => [v.id, { mode: null, shelf: null, items: [], next: 0, modal: false, line: '', toast: '' }]));
+    let chosen = null;
+    const qr = `<svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="4" aria-hidden="true"><path d="M4 4h22v22H4zM54 4h22v22H54zM4 54h22v22H4zM11 11h8v8h-8zM61 11h8v8h-8zM11 61h8v8h-8zM40 6v12M34 26h16M34 34v10h14M55 34h16M61 42v12M39 58h11M34 70h15M54 60h22M70 68v8"/></svg>`;
+    function renderPhone(id) {
+      const s = states[id];
+      const isReturn = s.mode === 'return';
+      const title = isReturn ? '归还' : '领取';
+      const scanShelf = isReturn && !s.shelf;
+      const rows = s.items.length ? s.items.map((m, index) => `<div class="item"><span><strong>${m.code}</strong><small>${m.detail}</small></span><button type="button" data-action="remove" data-index="${index}" aria-label="移除 ${m.code}">×</button></div>`).join('') : `<div class="empty">扫到的模具会一行一行出现在这里</div>`;
+      const modal = s.modal ? `<div class="modal-shade"><div class="modal"><h4>选择目标产线</h4><p>领取扫码完成后，提交前再确认去向。</p><select data-action="line"><option value="">请选择产线</option><option value="一号产线" ${s.line === '一号产线' ? 'selected' : ''}>一号产线</option><option value="二号产线" ${s.line === '二号产线' ? 'selected' : ''}>二号产线</option></select><div class="modal-actions"><button type="button" data-action="cancel">继续扫码</button><button type="button" data-action="finish">确认领取</button></div></div></div>` : '';
+      if (!s.mode) return `<div class="phone-inner"><div class="app-top"><p class="app-brand">鞋模具仓库 / MOBILE</p><h3>今天要做什么？</h3><p>请选择一项，立即开始扫码</p></div><div class="app-body"><div class="home-label">开始作业</div><button class="home-action issue" type="button" data-action="issue"><span><strong>领取</strong><small>直接扫描模具</small></span><span class="action-arrow">↗</span></button><button class="home-action return" type="button" data-action="return"><span><strong>归还</strong><small>先扫库位，再扫模具</small></span><span class="action-arrow">↗</span></button><p class="home-foot">同一笔作业可连续扫码。提交前会显示完整清单供核对。</p></div></div>`;
+      return `<div class="phone-inner"><div class="app-top work-top"><button class="back" type="button" data-action="back">← 返回</button><p class="app-brand">当前作业 / ${title}</p><h3>${title}模具</h3><p>${scanShelf ? '第一步，扫描实际归还库位' : '保持扫码，模具会自动加入下方清单'}</p></div><div class="app-body"><div class="stage"><h4>${scanShelf ? '先扫描库位' : '扫描模具'}</h4><span class="stage-count">${isReturn ? (scanShelf ? '1 / 2' : '2 / 2') : '持续扫码'}</span></div>${isReturn && s.shelf ? `<div class="shelf-banner"><span><strong>库位 ${s.shelf}</strong><small>本次归还的实际位置</small></span><button type="button" data-action="reset-shelf">重扫库位</button></div>` : ''}<div class="scan-frame"><div class="scan-mark">${qr}</div><p>${scanShelf ? '将库位二维码放入扫描框' : '将模具二维码放入扫描框'}</p></div><button class="scan-trigger" type="button" data-action="${scanShelf ? 'scan-shelf' : 'scan-mold'}">${scanShelf ? '演示：扫到库位 A-01-1' : '演示：扫到一件模具'}</button><div class="section-line"><h4>已扫描清单</h4><span>${s.items.length} 件</span></div><div class="items">${rows}</div><div class="bottom-action"><button type="button" data-action="complete" ${!s.items.length || scanShelf ? 'disabled' : ''}>完成${title} · ${s.items.length} 件</button><p>这里只展示界面和流程，不会提交真实单据</p></div></div>${modal}${s.toast ? `<div class="toast" role="status">${s.toast}</div>` : ''}</div>`;
+    }
+    function render() {
+      document.getElementById('options').innerHTML = variants.map(v => `<article class="option variant-${v.id} ${chosen === v.id ? 'chosen' : ''}" data-variant="${v.id}"><div class="option-head"><div><span class="option-code">${v.code}</span><h2>${v.title}</h2><p class="option-desc">${v.description}</p></div><button class="choose" type="button" data-action="choose">${chosen === v.id ? '已选择' : '选这个'}</button></div><div class="phone">${renderPhone(v.id)}</div></article>`).join('');
+    }
+    document.getElementById('options').addEventListener('click', event => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const card = button.closest('[data-variant]');
+      const id = card?.dataset.variant;
+      if (!id) return;
+      const s = states[id];
+      const action = button.dataset.action;
+      s.toast = '';
+      if (action === 'choose') chosen = id;
+      if (action === 'issue' || action === 'return') { s.mode = action; s.shelf = null; s.items = []; s.next = 0; s.modal = false; }
+      if (action === 'back') { s.mode = null; s.modal = false; }
+      if (action === 'scan-shelf') { s.shelf = 'A-01-1'; s.toast = '库位已确认，请继续扫描模具'; }
+      if (action === 'reset-shelf') { s.shelf = null; s.items = []; s.toast = '已清空清单，请先扫新库位'; }
+      if (action === 'scan-mold') {
+        const next = sampleMolds[s.next % sampleMolds.length];
+        s.next += 1;
+        if (!s.items.some(item => item.code === next.code)) { s.items.push(next); s.toast = `${next.code} 已加入清单`; }
+        else s.toast = `${next.code} 已在清单中，不重复添加`;
+      }
+      if (action === 'remove') s.items.splice(Number(button.dataset.index), 1);
+      if (action === 'complete') {
+        if (s.mode === 'issue') s.modal = true;
+        else { s.items = []; s.toast = '演示完成：真实 App 将在此确认归还结果'; }
+      }
+      if (action === 'cancel') s.modal = false;
+      if (action === 'finish') {
+        if (!s.line) s.toast = '请先选择目标产线';
+        else { s.items = []; s.modal = false; s.toast = `演示完成：目标为${s.line}`; }
+      }
+      render();
+    });
+    document.getElementById('options').addEventListener('change', event => {
+      if (event.target.dataset.action === 'line') states[event.target.closest('[data-variant]').dataset.variant].line = event.target.value;
+    });
+    render();
+  </script>
+</body>
+</html>

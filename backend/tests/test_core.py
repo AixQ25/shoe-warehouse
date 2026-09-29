@@ -85,6 +85,102 @@ class CoreFlowTest(unittest.TestCase):
     def transition(self, client: TestClient, mold_id: int, action: str, version: int, target: int, csrf: str, found_status: str | None = None, request_id: str | None = None):
         return client.post(f"/api/molds/{mold_id}/transition", json={"request_id": request_id or str(uuid4()), "action": action, "expected_version": version, "target_location_id": target, "reason": "现场核对后办理状态流转", "found_status": found_status}, headers={"X-CSRF-Token": csrf})
 
+    def test_shelf_identity_is_generated_and_other_locations_need_names(self) -> None:
+        csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        headers = {"X-CSRF-Token": csrf}
+        created = self.admin.post("/api/locations", json={"type": "SHELF", "zone": " a ", "rack": "01", "level": "3"}, headers=headers)
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["code"], "A-01-3")
+        location = next(item for item in self.admin.get("/api/locations").json() if item["id"] == created.json()["id"])
+        self.assertEqual((location["name"], location["zone"], location["rack"], location["level"]), ("A区1号架3层", "A", "1", "3"))
+        duplicate = self.admin.post("/api/locations", json={"type": "SHELF", "zone": "A", "rack": "1", "level": "03"}, headers=headers)
+        self.assertEqual(duplicate.status_code, 409)
+        missing_name = self.admin.post("/api/locations", json={"type": "LINE", "code": "产线03"}, headers=headers)
+        self.assertEqual(missing_name.status_code, 422)
+
+    def test_unused_location_can_be_deleted_but_referenced_location_cannot(self) -> None:
+        admin_csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        worker_csrf = self.login(self.worker, "zhangsan", "StrongWorkerPass-123")
+        headers = {"X-CSRF-Token": admin_csrf}
+        created = self.admin.post("/api/locations", json={"type": "SHELF", "zone": "B", "rack": "1", "level": "1"}, headers=headers)
+        self.assertEqual(created.status_code, 200, created.text)
+        location_id = created.json()["id"]
+        self.assertEqual(self.worker.delete(f"/api/locations/{location_id}", headers={"X-CSRF-Token": worker_csrf}).status_code, 403)
+        self.assertEqual(self.admin.delete(f"/api/locations/{self.shelf_a}", headers=headers).status_code, 409)
+        self.assertEqual(self.admin.delete("/api/locations/999999", headers=headers).status_code, 404)
+
+        with self.factory() as db:
+            mold = db.scalar(select(Mold).order_by(Mold.id))
+            assert mold is not None
+            mold.current_location_id = location_id
+            db.commit()
+        self.assertEqual(self.admin.delete(f"/api/locations/{location_id}", headers=headers).status_code, 409)
+
+        with self.factory() as db:
+            mold = db.scalar(select(Mold).order_by(Mold.id))
+            assert mold is not None
+            mold.current_location_id = self.shelf_a
+            actor = db.scalar(select(User).where(User.username == "admin"))
+            assert actor is not None
+            operation = Operation(request_id=str(uuid4()), payload_hash="location-delete-test", type="MOVE", actor_user_id=actor.id, target_location_id=location_id)
+            db.add(operation)
+            db.commit()
+            operation_id = operation.id
+        self.assertEqual(self.admin.delete(f"/api/locations/{location_id}", headers=headers).status_code, 409)
+
+        with self.factory() as db:
+            db.delete(db.get(Operation, operation_id))
+            db.commit()
+        deleted = self.admin.delete(f"/api/locations/{location_id}", headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse(any(item["id"] == location_id for item in self.admin.get("/api/locations").json()))
+        recreated = self.admin.post("/api/locations", json={"type": "SHELF", "zone": "B", "rack": "1", "level": "1"}, headers=headers)
+        self.assertEqual(recreated.status_code, 200, recreated.text)
+
+    def test_new_basic_records_can_be_deleted_in_dependency_order(self) -> None:
+        csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        headers = {"X-CSRF-Token": csrf}
+        person = self.admin.post("/api/people", json={"name": "误录人员", "employee_code": "ERR-01"}, headers=headers)
+        self.assertEqual(person.status_code, 200, person.text)
+        account = self.admin.post("/api/auth/users", json={"username": "wrong-account", "password": "StrongWrongPass-123", "role": "WORKER", "person_id": person.json()["id"]}, headers=headers)
+        self.assertEqual(account.status_code, 200, account.text)
+        worker_csrf = self.login(self.worker, "wrong-account", "StrongWrongPass-123")
+        self.assertEqual(self.worker.post("/api/devices/register", json={"label": "误录账号设备"}, headers={"X-CSRF-Token": worker_csrf}).status_code, 200)
+        self.assertEqual(self.admin.delete(f"/api/people/{person.json()['id']}", headers=headers).status_code, 409)
+        self.assertEqual(self.admin.delete(f"/api/auth/users/{account.json()['id']}", headers=headers).status_code, 200)
+        self.assertEqual(self.worker.get("/api/auth/me").status_code, 401)
+        self.assertEqual(self.admin.delete(f"/api/people/{person.json()['id']}", headers=headers).status_code, 200)
+        self.assertEqual(self.admin.delete(f"/api/auth/users/{self.admin.get('/api/auth/me').json()['id']}", headers=headers).status_code, 409)
+
+        model = self.admin.post("/api/models", json={"code": "WRONG-MODEL", "name": "误录型号"}, headers=headers)
+        self.assertEqual(model.status_code, 200, model.text)
+        mold_set = self.admin.post("/api/sets", json={"code": "WRONG-SET", "model_id": model.json()["id"], "default_location_id": self.shelf_b}, headers=headers)
+        self.assertEqual(mold_set.status_code, 200, mold_set.text)
+        self.assertEqual(self.admin.delete(f"/api/models/{model.json()['id']}", headers=headers).status_code, 409)
+        self.assertEqual(self.admin.delete(f"/api/sets/{mold_set.json()['id']}", headers=headers).status_code, 200)
+        self.assertEqual(self.admin.delete(f"/api/models/{model.json()['id']}", headers=headers).status_code, 200)
+        self.assertEqual(self.admin.post("/api/models", json={"code": "WRONG-MODEL", "name": "改正型号"}, headers=headers).status_code, 200)
+
+        device = self.admin.post("/api/devices/register", json={"label": "误录设备"}, headers=headers)
+        self.assertEqual(device.status_code, 200, device.text)
+        self.assertEqual(self.admin.delete(f"/api/devices/{device.json()['id']}", headers=headers).status_code, 200)
+
+    def test_manual_mold_entry_can_be_undone_before_business_use(self) -> None:
+        csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        headers = {"X-CSRF-Token": csrf}
+        with self.factory() as db:
+            model_id = db.scalar(select(MoldModel.id).limit(1))
+        mold_set = self.admin.post("/api/sets", json={"code": "SET-ERROR", "model_id": model_id, "default_location_id": self.shelf_b}, headers=headers)
+        self.assertEqual(mold_set.status_code, 200, mold_set.text)
+        payload = {"code": "M-ERROR", "set_id": mold_set.json()["id"], "size_label": "40", "status": "READY", "current_location_id": self.shelf_b}
+        mold = self.admin.post("/api/molds", json=payload, headers=headers)
+        self.assertEqual(mold.status_code, 200, mold.text)
+        self.assertEqual(self.admin.delete(f"/api/sets/{mold_set.json()['id']}", headers=headers).status_code, 409)
+        deleted = self.admin.delete(f"/api/molds/{mold.json()['id']}", headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(self.admin.post("/api/molds", json=payload, headers=headers).status_code, 200)
+        self.assertEqual(self.admin.delete(f"/api/molds/{self.admin.get('/api/molds?limit=1').json()['items'][0]['id']}", headers=headers).status_code, 409)
+
     def test_admin_account_and_default_location_maintenance(self) -> None:
         admin_csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
         readonly_csrf = self.login(self.worker, "warehouse-view", "StrongReadonlyPass-123")
@@ -253,7 +349,7 @@ class CoreFlowTest(unittest.TestCase):
             self.assertEqual(page.status_code, 200, page.text)
             self.assertEqual(page.json()["total"], 10)
             self.assertEqual([item["code"] for item in page.json()["items"]], ["M-000003", "M-000004", "M-000005"])
-            blocked = viewer.post("/api/locations", json={"code": "C-01-1", "name": "测试", "type": "SHELF"}, headers={"X-CSRF-Token": csrf})
+            blocked = viewer.post("/api/locations", json={"type": "SHELF", "zone": "C", "rack": "1", "level": "1"}, headers={"X-CSRF-Token": csrf})
             self.assertEqual(blocked.status_code, 403, blocked.text)
             self.assertEqual(viewer.get("/api/operations").status_code, 200)
         finally:

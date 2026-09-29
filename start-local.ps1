@@ -9,7 +9,9 @@ $warehouseData = Join-Path $localData 'mold-warehouse-dev'
 $warehouseDatabase = Join-Path $project 'office-pilot-data\warehouse.sqlite3'
 $runtimeFile = Join-Path $warehouseData 'running-instance.json'
 if (-not (Test-Path -LiteralPath $warehouseDatabase)) {
-    throw "U 盘办公室试点数据库不存在：$warehouseDatabase。请在原办公室电脑先双击 import-office-data.cmd；不会自动建立空库或重置密码。"
+    Write-Output "U 盘试点数据库不存在：$warehouseDatabase。正在首次建立空试点库。"
+    & (Join-Path $project 'initialize-office-pilot.ps1')
+    if (-not (Test-Path -LiteralPath $warehouseDatabase)) { throw '试点库初始化未完成，请查看上面的错误。' }
 }
 $env:DATABASE_URL = 'sqlite+pysqlite:///' + ($warehouseDatabase -replace '\\','/')
 $env:WAREHOUSE_ENV = 'development'
@@ -22,7 +24,7 @@ $logDirectory = Join-Path $warehouseData 'logs'
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $env:PYTHONUTF8 = '1'
 
-$pythonForCheck = (Get-Command python.exe -ErrorAction Stop).Source
+$pythonForCheck = if (Test-Path -LiteralPath $python) { $python } else { & (Join-Path $project 'select-python.ps1') }
 & $pythonForCheck (Join-Path $backend 'pilot_storage.py') check $warehouseDatabase
 if ($LASTEXITCODE -ne 0) { throw 'U 盘数据库检查失败；不会启动服务或修改账号。' }
 
@@ -85,16 +87,32 @@ if (-not $apiReady) {
 }
 
 if (-not (Test-Path -LiteralPath $python)) {
-    python -m venv $venv
+    $sourcePython = & (Join-Path $project 'select-python.ps1')
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $sourcePython -m venv $venv
+    } finally { $ErrorActionPreference = $previousPreference }
     if ($LASTEXITCODE -ne 0) { throw 'Python virtual environment creation failed.' }
-    & $python -m pip install -r (Join-Path $backend 'requirements.txt')
+}
+& $python (Join-Path $backend 'check_dependencies.py')
+if ($LASTEXITCODE -ne 0) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $python -m pip install -r (Join-Path $backend 'requirements.txt')
+    } finally { $ErrorActionPreference = $previousPreference }
     if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed.' }
 }
 
 if (-not $apiReady) {
     Push-Location $backend
     try {
-        & $python -m alembic upgrade head
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $python -m alembic upgrade head
+        } finally { $ErrorActionPreference = $previousPreference }
         if ($LASTEXITCODE -ne 0) { throw 'Database migration failed.' }
     } finally { Pop-Location }
 }
@@ -117,7 +135,9 @@ if (-not $apiReady) {
         if ($apiReady -or $apiProcess.HasExited) { break }
     }
     if (-not $apiReady) { throw "Backend did not become ready on port 8000. See $logDirectory\backend.err.log" }
-    @{ project = $project; database = $warehouseDatabase; instance_id = $env:WAREHOUSE_INSTANCE_ID; api_pid = $apiProcess.Id } | ConvertTo-Json | Set-Content -LiteralPath $runtimeFile -Encoding UTF8
+    $apiListener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction Stop | Select-Object -First 1
+    if (-not $apiListener) { throw 'Backend health check passed but the listening process could not be identified.' }
+    @{ project = $project; database = $warehouseDatabase; instance_id = $env:WAREHOUSE_INSTANCE_ID; api_pid = $apiListener.OwningProcess } | ConvertTo-Json | Set-Content -LiteralPath $runtimeFile -Encoding UTF8
 }
 
 $webReady = Test-WarehouseEndpoint $webUrl

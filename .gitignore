@@ -7,3 +7,12 @@
 office-pilot-data/
 frontend/public/warehouse-pilot-ca.crt
 Aixq.md
+android/.gradle/
+android/.kotlin/
+android/.idea/
+android/local.properties
+android/**/build/
+android/*.iml
+android/**/*.jks
+android/**/*.keystore
+android/app/src/debug/res/raw/warehouse_pilot_ca.crt

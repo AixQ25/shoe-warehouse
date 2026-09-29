@@ -7,13 +7,13 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import AuthContext, api_error, current_context, get_db, require_admin, require_csrf
-from .models import AuditLog, AuthorizedDevice, Location, LoginSession, Mold, MoldModel, MoldSet, Operation, OperationItem, Person, StocktakeSession, User, utc_now
+from .models import AuditLog, AuthorizedDevice, LabelPrintBatch, Location, LoginSession, Mold, MoldModel, MoldSet, Operation, OperationItem, Person, StocktakeAdjustment, StocktakeExpected, StocktakeScan, StocktakeSession, User, utc_now
 
 router = APIRouter(prefix="/api", tags=["catalog"])
 
@@ -24,12 +24,35 @@ class PersonInput(BaseModel):
 
 
 class LocationInput(BaseModel):
-    code: str = Field(min_length=1, max_length=80)
-    name: str = Field(min_length=1, max_length=120)
+    code: str | None = Field(default=None, max_length=80)
+    name: str | None = Field(default=None, max_length=120)
     type: Literal["SHELF", "LINE", "INSPECTION", "REPAIR", "SCRAP", "UNKNOWN"]
     zone: str | None = Field(default=None, max_length=20)
     rack: str | None = Field(default=None, max_length=20)
     level: str | None = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def resolve_identity(self) -> "LocationInput":
+        if self.type == "SHELF":
+            zone = (self.zone or "").strip().upper()
+            rack = (self.rack or "").strip()
+            level = (self.level or "").strip()
+            if not zone or not zone.isalnum() or not rack.isdecimal() or not level.isdecimal():
+                raise ValueError("普通库位须填写区域、数字货架和数字层")
+            rack_number, level_number = int(rack), int(level)
+            if rack_number < 1 or level_number < 1:
+                raise ValueError("货架和层须为正整数")
+            self.zone = zone
+            self.rack = str(rack_number)
+            self.level = str(level_number)
+            self.code = f"{zone}-{rack_number:02d}-{level_number}"
+            self.name = f"{zone}区{rack_number}号架{level_number}层"
+        else:
+            self.code = (self.code or "").strip()
+            self.name = (self.name or "").strip()
+            if not self.code or not self.name:
+                raise ValueError("编号和名称不能为空")
+        return self
 
 
 class ModelInput(BaseModel):
@@ -120,6 +143,22 @@ def create_person(payload: PersonInput, context: AuthContext = Depends(require_c
     return {"id": person.id, "name": person.name}
 
 
+@router.delete("/people/{person_id}")
+def delete_person(person_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    person = db.scalar(select(Person).where(Person.id == person_id).with_for_update())
+    if person is None:
+        raise api_error(404, "PERSON_NOT_FOUND", "人员不存在")
+    if db.scalar(select(User.id).where(User.person_id == person_id).limit(1)) is not None:
+        raise api_error(409, "PERSON_IN_USE", "人员已关联账号，请先处理账号")
+    if db.scalar(select(Mold.id).where(Mold.custodian_person_id == person_id).limit(1)) is not None or db.scalar(select(OperationItem.id).where(or_(OperationItem.before_custodian_id == person_id, OperationItem.after_custodian_id == person_id)).limit(1)) is not None:
+        raise api_error(409, "PERSON_IN_USE", "人员已关联模具或流转记录，不能删除")
+    db.delete(person)
+    db.add(AuditLog(actor_user_id=context.user.id, action="PERSON_DELETE", entity=str(person_id), before=person.name))
+    save_or_conflict(db, "PERSON_IN_USE", "人员已被业务记录引用，不能删除")
+    return {"id": person_id, "name": person.name}
+
+
 @router.patch("/people/{person_id}/active")
 def set_person_active(person_id: int, payload: PersonActiveInput, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
     require_admin(context)
@@ -161,6 +200,31 @@ def create_location(payload: LocationInput, context: AuthContext = Depends(requi
     return {"id": location.id, "code": location.code}
 
 
+@router.delete("/locations/{location_id}")
+def delete_location(location_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    location = db.scalar(select(Location).where(Location.id == location_id).with_for_update())
+    if location is None:
+        raise api_error(404, "LOCATION_NOT_FOUND", "位置不存在")
+    references = (
+        (MoldSet, MoldSet.default_location_id == location_id, "模具套的默认库位"),
+        (Mold, Mold.current_location_id == location_id, "模具的当前位置"),
+        (StocktakeSession, StocktakeSession.location_id == location_id, "盘点记录"),
+        (Operation, Operation.target_location_id == location_id, "流转记录"),
+    )
+    for model, condition, description in references:
+        if db.scalar(select(model.id).where(condition).limit(1)) is not None:
+            raise api_error(409, "LOCATION_IN_USE", f"位置已被{description}引用，不能删除")
+    if db.scalar(select(OperationItem.id).where(or_(OperationItem.before_location_id == location_id, OperationItem.after_location_id == location_id)).limit(1)) is not None:
+        raise api_error(409, "LOCATION_IN_USE", "位置已被流转记录引用，不能删除")
+    if any(location.code.upper() in (code.upper() for code in json.loads(record.codes_json)) for record in db.scalars(select(LabelPrintBatch).where(LabelPrintBatch.kind == "LOCATION")).all()):
+        raise api_error(409, "LOCATION_IN_USE", "位置已打印标签，不能删除")
+    db.delete(location)
+    db.add(AuditLog(actor_user_id=context.user.id, action="LOCATION_DELETE", entity=location.code, before=location.name))
+    save_or_conflict(db, "LOCATION_IN_USE", "位置已被业务记录引用，不能删除")
+    return {"id": location_id, "code": location.code}
+
+
 @router.get("/models")
 def list_models(_context: AuthContext = Depends(current_context), db: Session = Depends(get_db)) -> list[dict]:
     return [{"id": item.id, "code": item.code, "name": item.name, "notes": item.notes} for item in db.scalars(select(MoldModel).order_by(MoldModel.code)).all()]
@@ -175,6 +239,20 @@ def create_model(payload: ModelInput, context: AuthContext = Depends(require_csr
     db.add(AuditLog(actor_user_id=context.user.id, action="MODEL_CREATE", entity=model.code, after=model.name))
     save_or_conflict(db, "MODEL_CONFLICT", "型号编号已存在")
     return {"id": model.id, "code": model.code}
+
+
+@router.delete("/models/{model_id}")
+def delete_model(model_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    model = db.scalar(select(MoldModel).where(MoldModel.id == model_id).with_for_update())
+    if model is None:
+        raise api_error(404, "MODEL_NOT_FOUND", "型号不存在")
+    if db.scalar(select(MoldSet.id).where(MoldSet.model_id == model_id).limit(1)) is not None:
+        raise api_error(409, "MODEL_IN_USE", "型号已关联模具套，请先处理模具套")
+    db.delete(model)
+    db.add(AuditLog(actor_user_id=context.user.id, action="MODEL_DELETE", entity=model.code, before=model.name))
+    save_or_conflict(db, "MODEL_IN_USE", "型号已被业务资料引用，不能删除")
+    return {"id": model_id, "code": model.code}
 
 
 @router.get("/sets")
@@ -200,6 +278,20 @@ def create_set(payload: SetInput, context: AuthContext = Depends(require_csrf), 
     db.add(AuditLog(actor_user_id=context.user.id, action="SET_CREATE", entity=mold_set.code, after=location.code))
     save_or_conflict(db, "SET_CONFLICT", "套号已存在")
     return {"id": mold_set.id, "code": mold_set.code, "complete": False}
+
+
+@router.delete("/sets/{set_id}")
+def delete_set(set_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    mold_set = db.scalar(select(MoldSet).where(MoldSet.id == set_id).with_for_update())
+    if mold_set is None:
+        raise api_error(404, "SET_NOT_FOUND", "模具套不存在")
+    if db.scalar(select(Mold.id).where(Mold.set_id == set_id).limit(1)) is not None:
+        raise api_error(409, "SET_IN_USE", "模具套已有单模具，请先处理单模具")
+    db.delete(mold_set)
+    db.add(AuditLog(actor_user_id=context.user.id, action="SET_DELETE", entity=mold_set.code, before=mold_set.default_location.code))
+    save_or_conflict(db, "SET_IN_USE", "模具套已被业务资料引用，不能删除")
+    return {"id": set_id, "code": mold_set.code}
 
 
 @router.patch("/sets/{set_id}/default-location")
@@ -268,6 +360,31 @@ def create_mold(payload: MoldInput, context: AuthContext = Depends(require_csrf)
     db.add(AuditLog(actor_user_id=context.user.id, action="MOLD_CREATE", entity=mold.code, after=location.code))
     save_or_conflict(db, "MOLD_CONFLICT", "模具编号或套内尺码重复")
     return mold_dict(mold)
+
+
+@router.delete("/molds/{mold_id}")
+def delete_mold(mold_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    mold = db.scalar(select(Mold).where(Mold.id == mold_id).with_for_update())
+    if mold is None:
+        raise api_error(404, "MOLD_NOT_FOUND", "模具不存在")
+    for model in (StocktakeExpected, StocktakeScan, StocktakeAdjustment):
+        if db.scalar(select(model.id).where(model.mold_id == mold_id).limit(1)) is not None:
+            raise api_error(409, "MOLD_IN_USE", "模具已有盘点记录，不能删除")
+    if any(mold.code.upper() in (code.upper() for code in json.loads(record.codes_json)) for record in db.scalars(select(LabelPrintBatch).where(LabelPrintBatch.kind == "MOLD")).all()):
+        raise api_error(409, "MOLD_IN_USE", "模具已打印标签，不能删除")
+    items = db.scalars(select(OperationItem).where(OperationItem.mold_id == mold_id)).all()
+    if len(items) != 1:
+        raise api_error(409, "MOLD_IN_USE", "模具已有流转记录，不能删除")
+    operation = db.get(Operation, items[0].operation_id)
+    if operation is None or operation.type != "INITIALIZE" or operation.reason != "维护员逐件建档" or db.scalar(select(OperationItem.id).where(OperationItem.operation_id == operation.id, OperationItem.id != items[0].id).limit(1)) is not None:
+        raise api_error(409, "MOLD_IN_USE", "模具已有业务记录，不能删除")
+    code = mold.code
+    db.delete(operation)
+    db.delete(mold)
+    db.add(AuditLog(actor_user_id=context.user.id, action="MOLD_DELETE", entity=code, before=f"撤销逐件建档 #{operation.id}"))
+    save_or_conflict(db, "MOLD_IN_USE", "模具已被业务记录引用，不能删除")
+    return {"id": mold_id, "code": code}
 
 
 @router.post("/scan/resolve")

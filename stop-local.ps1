@@ -42,9 +42,17 @@ if ($health) {
             }
         }
     }
-    $apiListener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -eq [int]$state.api_pid } | Select-Object -First 1
-    if (-not $apiListener) { throw '无法确认后端进程编号，已拒绝结束进程；请重启电脑后再安全移除 U 盘。' }
-    Stop-Process -Id ([int]$state.api_pid) -ErrorAction Stop
+    $apiListener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $apiListener) { throw '无法确认后端监听进程，已拒绝结束进程；请重启电脑后再安全移除 U 盘。' }
+    $apiPidToStop = [int]$apiListener.OwningProcess
+    if ($apiPidToStop -ne [int]$state.api_pid) {
+        # A Windows virtual environment may launch its base Python as a child.
+        $apiProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$apiPidToStop" -ErrorAction Stop
+        if (-not $apiProcess -or [int]$apiProcess.ParentProcessId -ne [int]$state.api_pid) {
+            throw '后端监听进程与记录的启动进程不符，已拒绝结束进程。'
+        }
+    }
+    Stop-Process -Id $apiPidToStop -ErrorAction Stop
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         if (-not (Get-WarehouseHealth)) { break }
         Start-Sleep -Milliseconds 250

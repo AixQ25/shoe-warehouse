@@ -10,7 +10,7 @@ React + TypeScript + Vite。电脑页面使用同一侧边栏、货架布局和�
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-local.ps1
 ```
 
-首次使用前须在原办公室电脑双击 `import-office-data.cmd`，把既有试点库迁入 U 盘的 `office-pilot-data/warehouse.sqlite3`。此后双击 `start-local.cmd`，继续使用原账号和密码；启动不会创建新库、新账号或样例模具。浏览器打开 `http://127.0.0.1:5173/` 登录。脚本将 Vite 的 `/api` 代理到本机 `127.0.0.1:8000`。每日结束双击 `stop-local.cmd`，等待电脑本地备份完成后安全弹出 U 盘。完整步骤见[办公室试点操作说明](../办公室试点操作说明.md)。
+首次双击 `start-local.cmd` 会在项目内创建空的 `office-pilot-data/warehouse.sqlite3`，并要求设置 admin 密码；不会导入样例模具。以后启动继续使用同一数据库和密码。浏览器打开 `http://127.0.0.1:5173/` 登录。脚本将 Vite 的 `/api` 代理到本机 `127.0.0.1:8000`。每日结束双击 `stop-local.cmd`，等待电脑本地备份完成后安全弹出 U 盘。完整步骤见[办公室试点操作说明](../办公室试点操作说明.md)。
 
 电脑重启后服务进程会退出，需再次双击启动文件；登录页出现 502 通常表示后端未运行，并不意味着密码改变。启动脚本会核对正在运行的后端身份、U 盘数据库和页面代理；若身份不匹配会拒绝继续。服务日志在 `%LOCALAPPDATA%\mold-warehouse-dev\logs`。若只需手动启动前端，在后端运行后执行 `npm.cmd ci`、`npm.cmd run dev`。更多账号及迁移命令见 [后端说明](../backend/README.md)。`?page=records` 可直接打开流转记录；从该页的“登记流转”进入现场流转登记。旧链接的 `?demo=1` 或 `?source=demo` 参数会被移除。
 

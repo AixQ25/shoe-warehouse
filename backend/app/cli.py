@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import os
 import secrets
 from datetime import timedelta
@@ -11,6 +10,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 
 from .auth import hash_password
+from .console_input import read_password
 from .database import Base, make_engine, make_session_factory
 from .models import Location, Mold, MoldModel, MoldSet, Operation, OperationItem, Person, User, utc_now
 
@@ -21,8 +21,8 @@ def assert_development() -> None:
 
 
 def create_user(username: str, person_name: str | None, role: str) -> None:
-    password = getpass.getpass("新账号密码：")
-    confirm = getpass.getpass("再次输入：")
+    password = read_password("新账号密码（输入时显示 *）：")
+    confirm = read_password("再次输入（输入时显示 *）：")
     if password != confirm or len(password) < 12:
         raise SystemExit("密码不一致，或少于 12 个字符")
     engine = make_engine()
