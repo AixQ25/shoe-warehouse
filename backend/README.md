@@ -18,7 +18,7 @@ $env:DATABASE_URL = 'sqlite+pysqlite:///' + (((Resolve-Path '..\office-pilot-dat
 & "$env:LOCALAPPDATA\mold-warehouse-venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-这些手工命令仅供开发维护；日常试点直接使用根目录启动/停止文件。必须明确设置 `DATABASE_URL`，后端不再默认连接电脑本地库。`bootstrap-local` 只用于单独建立的空开发库，不应用于既有办公室试点库。交互式开户命令要求至少 12 字符密码，不写入源文件。API 文档位于本机 `http://127.0.0.1:8000/docs`。前端开发服务器可代理 `/api` 到本机 8000 端口。
+这些手工命令仅供开发维护；日常试点直接使用根目录启动/停止文件。必须明确设置 `DATABASE_URL`，后端不再默认连接电脑本地库。`bootstrap-local` 只用于单独建立的空开发库，不应用于既有办公室试点库。交互式开户命令要求至少 6 位密码，不写入源文件。API 文档位于本机 `http://127.0.0.1:8000/docs`。前端开发服务器可代理 `/api` 到本机 8000 端口。
 
 新建的试点库为空，不需要清空样例。`prepare_pilot.py` 仅保留给符合旧样例结构的已有开发库使用，不用于新库。可通过前端 CSV 模板导入真实试点资料，填写要求见[试点导入说明](../试点导入说明.md)。
 

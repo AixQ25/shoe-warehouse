@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from .auth import AuthContext, api_error, get_db, require_admin, require_csrf, require_device, require_operator
+from .capacity import ensure_shelf_capacity
 from .catalog import mold_dict
 from .models import AuditLog, Location, Mold, Operation, OperationItem, StocktakeSession
 from .operations import response_for
@@ -87,6 +88,7 @@ def transition_mold(mold_id: int, payload: ExceptionInput, request: Request, con
     if not valid or after_status is None:
         raise api_error(409, "TRANSITION_INVALID", "当前状态或目标位置不允许这项操作")
 
+    ensure_shelf_capacity(db, locations, [(mold.current_location_id, target.id)])
     before_status = mold.status
     before_location = mold.current_location_id
     before_custodian = mold.custodian_person_id

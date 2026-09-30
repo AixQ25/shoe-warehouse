@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>鞋模具仓库 App 图标方案</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #f2f3ed; color: #172b25; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 20px 48px; }
+    main { max-width: 1100px; margin: auto; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .lead { margin: 0 0 26px; color: #637469; line-height: 1.6; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; }
+    article { padding: 20px; background: white; border: 1px solid #dce2d8; border-radius: 18px; }
+    .letter { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: #d8f267; font-weight: 800; }
+    h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; font-size: 18px; }
+    .large { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 24%; }
+    .small-row { display: flex; gap: 18px; align-items: end; margin-top: 20px; min-height: 92px; }
+    .small { width: 64px; height: 64px; border-radius: 24%; object-fit: cover; box-shadow: 0 4px 12px #172b2526; }
+    .round { border-radius: 50%; }
+    .caption { margin: 14px 0 0; color: #637469; font-size: 14px; line-height: 1.5; }
+    .hint { margin-top: 24px; padding: 14px 16px; background: #e7eddf; border-radius: 12px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>鞋模具仓库 App 图标方案</h1>
+    <p class="lead">下面展示完整图和接近手机桌面尺寸的方形、圆形预览。先选方向，再制作正式 Android 自适应图标。</p>
+    <div class="grid">
+      <article>
+        <h2><span class="letter">A</span> 货架与模具</h2>
+        <img class="large" src="a-shelf-molds.png" alt="A：货架与模具">
+        <div class="small-row"><img class="small" src="a-shelf-molds.png" alt="方形预览"><img class="small round" src="a-shelf-molds.png" alt="圆形预览"></div>
+        <p class="caption">突出仓库货架，画面信息最多。</p>
+      </article>
+      <article>
+        <h2><span class="letter">B</span> 领取与归还</h2>
+        <img class="large" src="b-take-return.png" alt="B：领取与归还">
+        <div class="small-row"><img class="small" src="b-take-return.png" alt="方形预览"><img class="small round" src="b-take-return.png" alt="圆形预览"></div>
+        <p class="caption">双向箭头对应 App 的两个主要操作。</p>
+      </article>
+      <article>
+        <h2><span class="letter">C</span> 扫码识别</h2>
+        <img class="large" src="c-scan-mold.png" alt="C：扫码识别">
+        <div class="small-row"><img class="small" src="c-scan-mold.png" alt="方形预览"><img class="small round" src="c-scan-mold.png" alt="圆形预览"></div>
+        <p class="caption">浅色底，强调扫码操作。</p>
+      </article>
+      <article>
+        <h2><span class="letter">D</span> 仓储抽屉</h2>
+        <img class="large" src="d-storage-drawer.png" alt="D：仓储抽屉">
+        <div class="small-row"><img class="small" src="d-storage-drawer.png" alt="方形预览"><img class="small round" src="d-storage-drawer.png" alt="圆形预览"></div>
+        <p class="caption">结构最规整，更偏仓库管理。</p>
+      </article>
+    </div>
+    <p class="hint">这些是设计草图，还没有替换手机里的 App 图标。选定后会按该方向制作正式尺寸与自适应版本。</p>
+  </main>
+</body>
+</html>

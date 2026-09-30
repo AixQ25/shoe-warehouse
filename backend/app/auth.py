@@ -111,7 +111,7 @@ class DeviceInput(BaseModel):
 
 class UserInput(BaseModel):
     username: str = Field(min_length=1, max_length=80)
-    password: str = Field(min_length=12, max_length=200)
+    password: str = Field(min_length=6, max_length=200)
     role: str
     person_id: int | None = None
 
@@ -122,7 +122,7 @@ class UserActiveInput(BaseModel):
 
 
 class PasswordResetInput(BaseModel):
-    password: str = Field(min_length=12, max_length=200)
+    password: str = Field(min_length=6, max_length=200)
     reason: str = Field(min_length=3, max_length=300)
 
 

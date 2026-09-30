@@ -18,8 +18,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -34,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.core.content.ContextCompat
@@ -115,12 +119,15 @@ fun QrCamera(onCode: (String) -> Unit) {
     }
     Box(Modifier.fillMaxWidth().height(250.dp)) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-        Button(
+        IconButton(
             onClick = { camera?.cameraControl?.enableTorch(!torchEnabled) },
             enabled = hasFlash,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD8F267), contentColor = Color(0xFF172B25)),
-            shape = RoundedCornerShape(6.dp),
-            modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
-        ) { Text(if (torchEnabled) "关闭手电筒" else "打开手电筒") }
+            modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).size(44.dp)
+                .background(if (torchEnabled) Color(0xFFD8F267) else Color(0xE6172B25), RoundedCornerShape(8.dp))
+        ) {
+            Icon(painterResource(R.drawable.ic_flashlight),
+                contentDescription = if (torchEnabled) "关闭手电筒" else "打开手电筒",
+                tint = if (torchEnabled) Color(0xFF172B25) else Color.White)
+        }
     }
 }

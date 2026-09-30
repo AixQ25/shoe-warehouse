@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import AuthContext, api_error, current_context, get_db, require_admin, require_csrf
+from .capacity import SHELF_CAPACITY, shelf_counts
 from .models import AuditLog, ImportBatch, Location, Mold, MoldModel, MoldSet, Operation, OperationItem, StocktakeSession, User, utc_now
 
 
@@ -90,6 +91,8 @@ def parse_csv(raw: bytes) -> tuple[list[dict], list[dict]]:
 def validate_rows(rows: list[dict], db: Session) -> list[dict]:
     problems: list[dict] = []
     locations = {item.code.upper(): item for item in db.scalars(select(Location)).all()}
+    shelf_ids = {item.id for item in locations.values() if item.type == "SHELF"}
+    occupied = shelf_counts(db, shelf_ids)
     models = {item.code.upper(): item for item in db.scalars(select(MoldModel)).all()}
     existing_sets = {code.upper() for code in db.scalars(select(MoldSet.code)).all()}
     existing_molds = {code.upper() for code in db.scalars(select(Mold.code)).all()}
@@ -134,6 +137,10 @@ def validate_rows(rows: list[dict], db: Session) -> list[dict]:
             problems.append(error(number, "current_location_code", "当前位置类型与初始状态不一致"))
         elif current.id in frozen_locations:
             problems.append(error(number, "current_location_code", "当前位置正在盘点"))
+        if current is not None and current.type == "SHELF":
+            occupied[current.id] = occupied.get(current.id, 0) + 1
+            if occupied[current.id] > SHELF_CAPACITY:
+                problems.append(error(number, "current_location_code", f"库位 {current.code} 最多存放 {SHELF_CAPACITY} 个模具，含本行将达到 {occupied[current.id]} 个"))
     for group in set_groups.values():
         if len(group) != 10:
             for row in group:

@@ -189,14 +189,15 @@ class CoreFlowTest(unittest.TestCase):
 
         person = self.admin.post("/api/people", json={"name": "王五", "employee_code": "E-005"}, headers={"X-CSRF-Token": admin_csrf})
         self.assertEqual(person.status_code, 200, person.text)
-        created = self.admin.post("/api/auth/users", json={"username": "wangwu", "password": "InitialPass-1234", "role": "WORKER", "person_id": person.json()["id"]}, headers={"X-CSRF-Token": admin_csrf})
+        self.assertEqual(self.admin.post("/api/auth/users", json={"username": "wangwu", "password": "12345", "role": "WORKER", "person_id": person.json()["id"]}, headers={"X-CSRF-Token": admin_csrf}).status_code, 422)
+        created = self.admin.post("/api/auth/users", json={"username": "wangwu", "password": "123456", "role": "WORKER", "person_id": person.json()["id"]}, headers={"X-CSRF-Token": admin_csrf})
         self.assertEqual(created.status_code, 200, created.text)
-        self.assertEqual(self.admin.post("/api/auth/users", json={"username": "duplicate", "password": "InitialPass-1234", "role": "WORKER", "person_id": person.json()["id"]}, headers={"X-CSRF-Token": admin_csrf}).status_code, 409)
+        self.assertEqual(self.admin.post("/api/auth/users", json={"username": "duplicate", "password": "123456", "role": "WORKER", "person_id": person.json()["id"]}, headers={"X-CSRF-Token": admin_csrf}).status_code, 409)
         self.assertNotIn("password", str(self.admin.get("/api/auth/users").json()))
 
         worker = TestClient(self.app)
         try:
-            worker_csrf = self.login(worker, "wangwu", "InitialPass-1234")
+            worker_csrf = self.login(worker, "wangwu", "123456")
             device = worker.post("/api/devices/register", json={"label": "王五手机"}, headers={"X-CSRF-Token": worker_csrf})
             self.assertEqual(device.status_code, 200, device.text)
             self.assertEqual(self.admin.post(f"/api/devices/{device.json()['id']}/authorize", headers={"X-CSRF-Token": admin_csrf}).status_code, 200)
@@ -204,13 +205,14 @@ class CoreFlowTest(unittest.TestCase):
             self.assertEqual(disabled.status_code, 200, disabled.text)
             self.assertEqual(worker.get("/api/auth/me").status_code, 401)
             self.assertEqual(self.admin.patch(f"/api/auth/users/{created.json()['id']}/active", json={"active": True, "reason": "人员返岗"}, headers={"X-CSRF-Token": admin_csrf}).status_code, 200)
-            self.login(worker, "wangwu", "InitialPass-1234")
+            self.login(worker, "wangwu", "123456")
             self.assertFalse(worker.get("/api/devices/current").json()["authorized"])
-            reset = self.admin.post(f"/api/auth/users/{created.json()['id']}/reset-password", json={"password": "ReplacementPass-1234", "reason": "本人申请重置"}, headers={"X-CSRF-Token": admin_csrf})
+            self.assertEqual(self.admin.post(f"/api/auth/users/{created.json()['id']}/reset-password", json={"password": "54321", "reason": "本人申请重置"}, headers={"X-CSRF-Token": admin_csrf}).status_code, 422)
+            reset = self.admin.post(f"/api/auth/users/{created.json()['id']}/reset-password", json={"password": "654321", "reason": "本人申请重置"}, headers={"X-CSRF-Token": admin_csrf})
             self.assertEqual(reset.status_code, 200, reset.text)
             self.assertEqual(worker.get("/api/auth/me").status_code, 401)
-            self.assertEqual(worker.post("/api/auth/login", json={"username": "wangwu", "password": "InitialPass-1234"}).status_code, 401)
-            self.login(worker, "wangwu", "ReplacementPass-1234")
+            self.assertEqual(worker.post("/api/auth/login", json={"username": "wangwu", "password": "123456"}).status_code, 401)
+            self.login(worker, "wangwu", "654321")
         finally:
             worker.close()
 
@@ -223,9 +225,9 @@ class CoreFlowTest(unittest.TestCase):
 
     def test_manual_mold_creation_records_initialization(self) -> None:
         csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
-        mold_set = self.admin.post("/api/sets", json={"code": "SET-0002", "model_id": 1, "default_location_id": self.shelf_a}, headers={"X-CSRF-Token": csrf})
+        mold_set = self.admin.post("/api/sets", json={"code": "SET-0002", "model_id": 1, "default_location_id": self.shelf_b}, headers={"X-CSRF-Token": csrf})
         self.assertEqual(mold_set.status_code, 200, mold_set.text)
-        created = self.admin.post("/api/molds", json={"code": "M-000011", "set_id": mold_set.json()["id"], "size_label": "36", "status": "READY", "current_location_id": self.shelf_a}, headers={"X-CSRF-Token": csrf})
+        created = self.admin.post("/api/molds", json={"code": "M-000011", "set_id": mold_set.json()["id"], "size_label": "36", "status": "READY", "current_location_id": self.shelf_b}, headers={"X-CSRF-Token": csrf})
         self.assertEqual(created.status_code, 200, created.text)
         operations = self.admin.get("/api/operations").json()
         self.assertEqual(len(operations), 1)
@@ -233,6 +235,72 @@ class CoreFlowTest(unittest.TestCase):
         self.assertEqual(operations[0]["items"][0]["before_status"], "NOT_REGISTERED")
         self.assertEqual(operations[0]["items"][0]["after_status"], "READY")
         self.assertEqual(operations[0]["items"][0]["before_version"], 0)
+
+    def test_shelf_capacity_blocks_creation_move_and_return_until_space_is_free(self) -> None:
+        admin_csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        worker_csrf = self.login(self.worker, "zhangsan", "StrongWorkerPass-123")
+        admin_headers = {"X-CSRF-Token": admin_csrf}
+        mold_set = self.admin.post("/api/sets", json={"code": "SET-0002", "model_id": 1, "default_location_id": self.shelf_a}, headers=admin_headers).json()
+        mold_payload = {"code": "M-000011", "set_id": mold_set["id"], "size_label": "36", "status": "READY", "current_location_id": self.shelf_a}
+        full = self.admin.post("/api/molds", json=mold_payload, headers=admin_headers)
+        self.assertEqual(full.status_code, 409, full.text)
+        self.assertEqual(full.json()["detail"]["error_code"], "LOCATION_FULL")
+        created = self.admin.post("/api/molds", json={**mold_payload, "current_location_id": self.shelf_b}, headers=admin_headers)
+        self.assertEqual(created.status_code, 200, created.text)
+
+        registered = self.worker.post("/api/devices/register", json={"label": "容量测试设备"}, headers={"X-CSRF-Token": worker_csrf})
+        self.assertEqual(registered.status_code, 200, registered.text)
+        self.assertEqual(self.admin.post(f"/api/devices/{registered.json()['id']}/authorize", headers=admin_headers).status_code, 200)
+        blocked_move = self.submit("MOVE", self.shelf_a, [created.json()["id"]], [1], worker_csrf)
+        self.assertEqual(blocked_move.status_code, 409, blocked_move.text)
+        self.assertEqual(blocked_move.json()["detail"]["error_code"], "LOCATION_FULL")
+        self.assertEqual(self.submit("ISSUE", self.line, [1], [1], worker_csrf).status_code, 200)
+        moved = self.submit("MOVE", self.shelf_a, [created.json()["id"]], [1], worker_csrf)
+        self.assertEqual(moved.status_code, 200, moved.text)
+        blocked_return = self.submit("RETURN", self.shelf_a, [1], [2], worker_csrf)
+        self.assertEqual(blocked_return.status_code, 409, blocked_return.text)
+        self.assertEqual(blocked_return.json()["detail"]["error_code"], "LOCATION_FULL")
+        self.assertEqual(self.submit("MOVE", self.shelf_b, [created.json()["id"]], [2], worker_csrf).status_code, 200)
+        self.assertEqual(self.submit("RETURN", self.shelf_a, [1], [2], worker_csrf).status_code, 200)
+        with self.factory() as db:
+            self.assertEqual(len(db.scalars(select(Mold).where(Mold.current_location_id == self.shelf_a, Mold.is_current.is_(True))).all()), 10)
+
+    def test_existing_overfull_shelf_can_shrink_but_cannot_grow(self) -> None:
+        worker_csrf = self.login(self.worker, "zhangsan", "StrongWorkerPass-123")
+        admin_csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        registered = self.worker.post("/api/devices/register", json={"label": "超量清理设备"}, headers={"X-CSRF-Token": worker_csrf})
+        self.admin.post(f"/api/devices/{registered.json()['id']}/authorize", headers={"X-CSRF-Token": admin_csrf})
+        with self.factory() as db:
+            second_set = MoldSet(code="SET-0002", model_id=1, default_location_id=self.shelf_a)
+            db.add(second_set)
+            db.flush()
+            db.add(Mold(code="M-000011", set_id=second_set.id, size_label="36", status="READY", current_location_id=self.shelf_a, version=1))
+            db.commit()
+        self.assertEqual(self.submit("ISSUE", self.line, [11], [1], worker_csrf).status_code, 200)
+        blocked_return = self.submit("RETURN", self.shelf_a, [11], [2], worker_csrf)
+        self.assertEqual(blocked_return.status_code, 409, blocked_return.text)
+        self.assertEqual(blocked_return.json()["detail"]["error_code"], "LOCATION_FULL")
+
+    def test_exception_recovery_and_correction_obey_shelf_capacity(self) -> None:
+        admin_csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        worker_csrf = self.login(self.worker, "zhangsan", "StrongWorkerPass-123")
+        headers = {"X-CSRF-Token": admin_csrf}
+        mold_set = self.admin.post("/api/sets", json={"code": "SET-0002", "model_id": 1, "default_location_id": self.shelf_a}, headers=headers).json()
+        pending = self.admin.post("/api/molds", json={"code": "M-000011", "set_id": mold_set["id"], "size_label": "36", "status": "PENDING_INSPECTION", "current_location_id": self.inspection}, headers=headers)
+        self.assertEqual(pending.status_code, 200, pending.text)
+        blocked = self.transition(self.admin, pending.json()["id"], "INSPECTION_PASS", 1, self.shelf_a, admin_csrf)
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertEqual(blocked.json()["detail"]["error_code"], "LOCATION_FULL")
+
+        registered = self.worker.post("/api/devices/register", json={"label": "更正测试设备"}, headers={"X-CSRF-Token": worker_csrf})
+        self.admin.post(f"/api/devices/{registered.json()['id']}/authorize", headers=headers)
+        issued = self.submit("ISSUE", self.line, [1], [1], worker_csrf)
+        self.assertEqual(issued.status_code, 200, issued.text)
+        self.assertEqual(self.transition(self.admin, pending.json()["id"], "INSPECTION_PASS", 1, self.shelf_a, admin_csrf).status_code, 200)
+        correction = self.admin.post(f"/api/operations/{issued.json()['id']}/corrections", json={"request_id": str(uuid4()), "reason": "尝试冲销已满库位"}, headers=headers)
+        self.assertEqual(correction.status_code, 409, correction.text)
+        self.assertEqual(correction.json()["detail"]["error_code"], "LOCATION_FULL")
+
 
     def test_admin_compensating_correction_and_subsequent_movement_guard(self) -> None:
         worker_csrf = self.login(self.worker, "zhangsan", "StrongWorkerPass-123")
@@ -522,13 +590,9 @@ class CoreFlowTest(unittest.TestCase):
         self.assertEqual(frozen_elsewhere.status_code, 409, frozen_elsewhere.text)
         self.assertEqual(frozen_elsewhere.json()["detail"]["error_code"], "OTHER_LOCATION_FROZEN")
         self.assertEqual(self.admin.post(f"/api/stocktakes/{other_stocktake.json()['id']}/cancel", json={"reason": "验证并解除另一库位冻结"}, headers=admin_headers).status_code, 200)
-        adjusted_wrong = self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json=wrong_request, headers=admin_headers)
-        self.assertEqual(adjusted_wrong.status_code, 200, adjusted_wrong.text)
-        self.assertEqual(adjusted_wrong.json()["stocktake"]["unexpected_codes"], [])
-        repeated = self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json=wrong_request, headers=admin_headers)
-        self.assertEqual(repeated.status_code, 200, repeated.text)
-        self.assertEqual(repeated.json()["operation"]["id"], adjusted_wrong.json()["operation"]["id"])
-        self.assertEqual(self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json={**wrong_request, "reason": "另一原因"}, headers=admin_headers).status_code, 409)
+        full_shelf = self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json=wrong_request, headers=admin_headers)
+        self.assertEqual(full_shelf.status_code, 409, full_shelf.text)
+        self.assertEqual(full_shelf.json()["detail"]["error_code"], "LOCATION_FULL")
 
         missing_request = {"request_id": str(uuid4()), "type": "MARK_UNVERIFIED", "mold_id": 10, "expected_version": 1, "target_location_id": self.unknown, "reason": "现场查找后未找到模具"}
         stale_missing = self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json={**missing_request, "request_id": str(uuid4()), "expected_version": 99}, headers=admin_headers)
@@ -536,6 +600,13 @@ class CoreFlowTest(unittest.TestCase):
         adjusted_missing = self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json=missing_request, headers=admin_headers)
         self.assertEqual(adjusted_missing.status_code, 200, adjusted_missing.text)
         self.assertEqual(adjusted_missing.json()["stocktake"]["missing_codes"], [])
+        adjusted_wrong = self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json=wrong_request, headers=admin_headers)
+        self.assertEqual(adjusted_wrong.status_code, 200, adjusted_wrong.text)
+        self.assertEqual(adjusted_wrong.json()["stocktake"]["unexpected_codes"], [])
+        repeated = self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json=wrong_request, headers=admin_headers)
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        self.assertEqual(repeated.json()["operation"]["id"], adjusted_wrong.json()["operation"]["id"])
+        self.assertEqual(self.admin.post(f"/api/stocktakes/{stocktake_id}/resolve", json={**wrong_request, "reason": "另一原因"}, headers=admin_headers).status_code, 409)
         closed = self.admin.post(f"/api/stocktakes/{stocktake_id}/close", headers=admin_headers)
         self.assertEqual(closed.status_code, 200, closed.text)
         with self.factory() as db:
@@ -549,7 +620,10 @@ class CoreFlowTest(unittest.TestCase):
         found = self.transition(self.admin, 10, "FOUND", 2, self.inspection, admin_csrf, found_status="PENDING_INSPECTION")
         self.assertEqual(found.status_code, 200, found.text)
         self.assertEqual(found.json()["mold"]["status"], "PENDING_INSPECTION")
-        passed = self.transition(self.admin, 10, "INSPECTION_PASS", 3, self.shelf_a, admin_csrf)
+        full_shelf = self.transition(self.admin, 10, "INSPECTION_PASS", 3, self.shelf_a, admin_csrf)
+        self.assertEqual(full_shelf.status_code, 409, full_shelf.text)
+        self.assertEqual(full_shelf.json()["detail"]["error_code"], "LOCATION_FULL")
+        passed = self.transition(self.admin, 10, "INSPECTION_PASS", 3, self.shelf_b, admin_csrf)
         self.assertEqual(passed.status_code, 200, passed.text)
         self.assertEqual(passed.json()["mold"]["status"], "READY")
 

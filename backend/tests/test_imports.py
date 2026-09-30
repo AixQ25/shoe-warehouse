@@ -107,6 +107,26 @@ class ImportExportTest(unittest.TestCase):
         self.login(self.viewer, "viewer", "ImportViewerPass-123")
         self.assertEqual(self.viewer.get("/api/exports/inventory").status_code, 403)
 
+    def test_import_rejects_shelf_over_capacity_in_preview_and_commit(self) -> None:
+        raw = self.sample_csv()
+        first = self.preview(raw).json()
+        self.assertTrue(first["valid"])
+        with self.factory() as db:
+            shelf_id = db.scalar(select(Location.id).where(Location.code == "A-01-1"))
+            model = MoldModel(code="XM-001", name='=HYPERLINK("bad")')
+            db.add(model)
+            db.flush()
+            mold_set = MoldSet(code="SET-OTHER", model_id=model.id, default_location_id=shelf_id)
+            db.add(mold_set)
+            db.flush()
+            db.add(Mold(code="M-OTHER", set_id=mold_set.id, size_label="35", status="READY", current_location_id=shelf_id, version=1))
+            db.commit()
+        stale_commit = self.admin.post("/api/imports/commit", json={"token": first["token"], "sha256": first["sha256"]}, headers={"X-CSRF-Token": self.admin_csrf})
+        self.assertEqual(stale_commit.status_code, 409, stale_commit.text)
+        self.assertEqual(self.preview(raw).json()["valid"], False)
+        with self.factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(Mold)), 1)
+
     def test_row_errors_and_changed_database_reject_entire_batch(self) -> None:
         invalid = self.preview(self.sample_csv(duplicate_size=True, bad_location=True))
         self.assertEqual(invalid.status_code, 200, invalid.text)

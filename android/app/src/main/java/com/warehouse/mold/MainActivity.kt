@@ -6,9 +6,14 @@ import android.os.Looper
 import android.media.AudioManager
 import android.media.ToneGenerator
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -33,21 +39,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import kotlinx.coroutines.delay
 
 private val ink = Color(0xFF172B25)
 private val lime = Color(0xFFD8F267)
@@ -90,8 +103,9 @@ class MainActivity : ComponentActivity() {
             try { action() }
             catch (error: ApiFailure) {
                 main.post {
-                    if (error.status == 401) state.user = null
-                    state.error = if (error.status == 401) "登录已过期，请重新登录；作业清单仍保留" else error.message ?: "请求失败"
+                    val sessionExpired = error.status == 401 && error.code != "BAD_CREDENTIALS"
+                    if (sessionExpired) { state.user = null; state.searchOpen = false }
+                    state.error = if (sessionExpired) "登录已过期，请重新登录；作业清单仍保留" else error.message ?: "请求失败"
                 }
             }
             catch (error: Exception) { main.post {
@@ -130,20 +144,25 @@ class MainActivity : ComponentActivity() {
             api.setServer(proposed)
             state.serverInput = api.baseUrl
             state.user = null
+            state.searchOpen = false
             state.device = null
             state.results.clear()
             state.message = "已连接新地址。请重新登录并核对设备授权；未确认的单据仍保留。"
         }
     }
 
-    private fun login() = job {
-        val user = api.login(state.username.trim(), state.password)
-        main.post { state.user = user; state.password = ""; state.message = "登录成功" }
-        val places = api.locations()
-        val device = api.device()
-        main.post {
-            state.locations.clear(); state.locations.addAll(places)
-            state.device = device
+    private fun login() {
+        val username = state.username.trim()
+        val password = state.password
+        job {
+            val user = api.login(username, password)
+            main.post { state.user = user; state.password = ""; state.message = ""; state.settingsOpen = false; state.searchOpen = false }
+            val places = api.locations()
+            val device = api.device()
+            main.post {
+                state.locations.clear(); state.locations.addAll(places)
+                state.device = device
+            }
         }
     }
 
@@ -153,9 +172,37 @@ class MainActivity : ComponentActivity() {
         main.post { state.locations.clear(); state.locations.addAll(places); state.device = device; state.message = "作业资料已刷新" }
     }
 
+    private fun openSearch() {
+        state.settingsOpen = false
+        state.searchOpen = true
+        state.searchQuery = ""
+        state.searchResults.clear()
+        state.searchTotal = 0
+        state.searchSubmitted = false
+        state.error = ""
+        state.message = ""
+    }
+
+    private fun searchMolds() {
+        val query = state.searchQuery.trim()
+        if (query.isBlank()) { state.error = "请输入模具编号、套号或型号"; return }
+        state.searchResults.clear()
+        state.searchSubmitted = false
+        job {
+            val result = api.searchMolds(query)
+            main.post {
+                if (state.searchOpen && state.searchQuery.trim() == query) {
+                    state.searchResults.addAll(result.items)
+                    state.searchTotal = result.total
+                    state.searchSubmitted = true
+                }
+            }
+        }
+    }
+
     private fun logout() = job {
         api.logout()
-        main.post { state.user = null; state.device = null; state.message = "已退出" }
+        main.post { state.user = null; state.device = null; state.searchOpen = false; state.message = "已退出" }
     }
 
     private fun refreshDevice() = job { val device = api.device(); main.post { state.device = device } }
@@ -167,6 +214,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun scanOrSearch(raw: String, fromCamera: Boolean = false) = job {
+        state.message = ""
         val value = raw.trim()
         require(value.isNotBlank()) { "请输入编号或扫码" }
         if (value.startsWith("MOLD:", true) || value.startsWith("LOC:", true)) {
@@ -248,9 +296,25 @@ class MainActivity : ComponentActivity() {
         state.results.clear()
         state.lastScan = ""
         state.lastScanAt = 0L
+        state.manualEntryOpen = false
         state.settingsOpen = false
+        state.searchOpen = false
         state.error = ""
         state.message = ""
+    }
+
+    private fun goBack() {
+        when {
+            state.clearConfirmVisible -> state.clearConfirmVisible = false
+            state.changeShelfConfirmVisible -> state.changeShelfConfirmVisible = false
+            state.searchOpen -> { state.searchOpen = false; state.error = ""; state.message = "" }
+            state.settingsOpen && !state.workOpen -> state.settingsOpen = false
+            state.confirmVisible && !state.pending -> { state.confirmVisible = false; state.cameraVisible = true }
+            state.workOpen -> {
+                state.workOpen = false; state.cameraVisible = false; state.manualEntryOpen = false
+                state.error = ""; state.message = ""
+            }
+        }
     }
 
     private fun clearWork() {
@@ -259,6 +323,21 @@ class MainActivity : ComponentActivity() {
         state.requestId = newRequestId(); state.draftOwnerId = state.user?.optInt("id")
         state.cameraVisible = false; state.confirmVisible = false; state.workOpen = false
         state.clearConfirmVisible = false
+        state.manualEntryOpen = false
+        saveDraft()
+    }
+
+    private fun changeReturnShelf(clearCart: Boolean = false) {
+        if (state.pending) { state.error = "请先确认上次提交结果"; return }
+        if (state.cart.isNotEmpty() && !clearCart) { state.changeShelfConfirmVisible = true; return }
+        if (clearCart) state.cart.clear()
+        state.targetId = null; state.query = ""; state.results.clear()
+        state.requestId = newRequestId()
+        state.lastScan = ""; state.lastScanAt = 0L
+        state.changeShelfConfirmVisible = false
+        state.error = ""; state.message = ""
+        state.manualEntryOpen = false
+        state.cameraVisible = true
         saveDraft()
     }
 
@@ -337,7 +416,7 @@ class MainActivity : ComponentActivity() {
         val items = JSONArray()
         state.cart.forEach { mold ->
             items.put(JSONObject().put("id", mold.id).put("code", mold.code).put("set_code", mold.setCode)
-                .put("model_code", mold.modelCode).put("size_label", mold.size).put("status", mold.status)
+                .put("model_code", mold.modelCode).put("name", mold.modelName).put("size_label", mold.size).put("status", mold.status)
                 .put("version", mold.version).put("current_location", mold.currentLocation)
                 .put("default_location_id", mold.defaultLocationId).put("default_location", mold.defaultLocation)
                 .put("custodian", mold.custodian))
@@ -373,6 +452,8 @@ class MainActivity : ComponentActivity() {
         val isReturn = s.mode == "RETURN"
         val action = if (isReturn) "归还" else "领取"
         val needsShelf = isReturn && s.targetId == null
+        BackHandler(enabled = s.clearConfirmVisible || s.changeShelfConfirmVisible ||
+            s.user != null && (s.searchOpen || s.settingsOpen && !s.workOpen || s.workOpen)) { goBack() }
         Scaffold(containerColor = ink, bottomBar = {
             if (s.user != null && s.workOpen && !s.pending) {
                 Surface(color = paper, shadowElevation = 8.dp) {
@@ -390,8 +471,6 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text(if (s.confirmVisible) "确认提交 $action · ${s.cart.size} 件" else "完成$action · ${s.cart.size} 件", fontWeight = FontWeight.Black, fontSize = 16.sp)
                         }
-                        Text("清单仅保存在本机，确认提交后才会更新库存", color = muted, fontSize = 11.sp,
-                            modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 7.dp))
                     }
                 }
             }
@@ -401,36 +480,33 @@ class MainActivity : ComponentActivity() {
                 verticalArrangement = Arrangement.spacedBy(15.dp)
             ) {
                 Surface(color = ink, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(horizontal = 20.dp, vertical = 22.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("鞋模具仓库  /  MOBILE", color = lime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            if (s.user != null && !s.workOpen) TextButton(onClick = { s.settingsOpen = !s.settingsOpen }) {
-                                Text(if (s.settingsOpen) "关闭设置" else "设置", color = Color.White)
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
+                        when {
+                            s.user == null -> Text("连接仓库", color = Color.White, fontWeight = FontWeight.Black, fontSize = 24.sp,
+                                modifier = Modifier.padding(vertical = 12.dp))
+                            s.searchOpen || s.settingsOpen && !s.workOpen -> TextButton(onClick = ::goBack,
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                                Text(if (s.searchOpen) "← 搜索" else "← 设置", color = Color.White,
+                                    fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                            }
+                            !s.workOpen -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = "中乔鞋材仓库",
+                                    modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)))
+                                Spacer(Modifier.weight(1f))
+                                TextButton(onClick = ::openSearch) { Text("搜索", color = Color.White) }
+                                TextButton(onClick = { s.settingsOpen = true }) {
+                                    Text("设置", color = Color.White)
+                                }
+                            }
+                            else -> {
+                                TextButton(onClick = ::goBack, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                                    Text(if (s.confirmVisible) "← 返回扫码" else "← $action", color = Color.White,
+                                        fontWeight = FontWeight.Bold, fontSize = if (s.confirmVisible) 16.sp else 22.sp)
+                                }
+                                if (s.confirmVisible) Text("核对本次$action", color = Color.White, fontWeight = FontWeight.Black,
+                                    fontSize = 24.sp, modifier = Modifier.padding(bottom = 8.dp))
                             }
                         }
-                        if (s.workOpen && s.user != null) TextButton(onClick = {
-                            if (s.confirmVisible && !s.pending) { s.confirmVisible = false; s.cameraVisible = true }
-                            else { s.workOpen = false; s.cameraVisible = false }
-                        }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                            Text(if (s.confirmVisible) "← 返回扫码" else "← 返回首页", color = Color.White)
-                        }
-                        Text(
-                            when {
-                                s.user == null -> "连接仓库"
-                                !s.workOpen -> "今天要做什么？"
-                                s.confirmVisible -> "核对本次$action"
-                                else -> "$action 模具"
-                            }, color = Color.White, fontWeight = FontWeight.Black, fontSize = 29.sp
-                        )
-                        Text(
-                            when {
-                                s.user == null -> "登录后开始作业"
-                                !s.workOpen -> "选择一项，立即开始扫码"
-                                s.confirmVisible -> "核对清单和目标位置，再提交"
-                                needsShelf -> "第一步，扫描实际归还库位"
-                                else -> "持续扫码，模具会逐行加入清单"
-                            }, color = Color(0xFFC9D8CB), fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp)
-                        )
                     }
                 }
 
@@ -440,6 +516,7 @@ class MainActivity : ComponentActivity() {
                     if (!scanning && s.message.isNotBlank()) Notice(s.message, Color(0xFFE5F0C6), ink)
                     when {
                         s.user == null -> LoginContent()
+                        s.searchOpen -> SearchContent()
                         draftRestricted() -> Notice("本机未完成作业属于另一个账号。请用原账号登录处理。", Color(0xFFFFE5DE), Color(0xFF932F22))
                         !s.workOpen -> HomeContent()
                         s.confirmVisible -> ConfirmContent()
@@ -456,6 +533,13 @@ class MainActivity : ComponentActivity() {
             confirmButton = { TextButton(onClick = ::clearWork) { Text("清空", color = Color(0xFFB53F2E)) } },
             dismissButton = { TextButton(onClick = { s.clearConfirmVisible = false }) { Text("继续作业") } }
         )
+        if (s.changeShelfConfirmVisible) AlertDialog(
+            onDismissRequest = { s.changeShelfConfirmVisible = false },
+            title = { Text("更换归还库位？") },
+            text = { Text("已扫模具会从本次清单中移除。") },
+            confirmButton = { TextButton(onClick = { changeReturnShelf(clearCart = true) }) { Text("更换库位") } },
+            dismissButton = { TextButton(onClick = { s.changeShelfConfirmVisible = false }) { Text("继续作业") } }
+        )
     }
 
     @Composable
@@ -468,6 +552,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun LoginContent() {
         val s = state
+        val focus = LocalFocusManager.current
         if (BuildConfig.CAN_EDIT_SERVER) {
             TextButton(onClick = { s.settingsOpen = !s.settingsOpen }) {
                 Text(if (s.settingsOpen) "收起服务器设置" else "服务器设置", color = ink)
@@ -479,10 +564,14 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth()) { Text("测试连接并保存") }
             }
         }
-        OutlinedTextField(s.username, { s.username = it }, label = { Text("账号") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(s.username, { s.username = it }, label = { Text("账号") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
+            modifier = Modifier.fillMaxWidth())
         OutlinedTextField(s.password, { s.password = it }, label = { Text("密码") }, singleLine = true,
-            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        Button(onClick = ::login, enabled = !s.busy && api.baseUrl.isNotBlank(),
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+            modifier = Modifier.fillMaxWidth())
+        Button(onClick = { focus.clearFocus(); main.post(::login) }, enabled = !s.busy && api.baseUrl.isNotBlank(),
             colors = ButtonDefaults.buttonColors(containerColor = lime, contentColor = ink),
             shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("登录", fontWeight = FontWeight.Bold) }
         if (api.baseUrl.isBlank()) Text("请先设置服务器地址", color = muted, fontSize = 12.sp)
@@ -493,7 +582,7 @@ class MainActivity : ComponentActivity() {
         val s = state
         val device = s.device
         val hasDraft = s.cart.isNotEmpty() || s.targetId != null || s.pending
-        Text("开始作业", color = muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        if (s.settingsOpen) { SettingsContent(); return }
         if (hasDraft) {
             Surface(color = Color(0xFFE4EBCB), shape = RoundedCornerShape(8.dp)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -504,23 +593,81 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        HomeAction("领取", "直接扫描模具", lime, ink, enabled = !s.pending, onClick = { changeMode("ISSUE") })
-        HomeAction("归还", "先扫库位，再扫模具", Color(0xFF264638), Color.White,
+        HomeAction("领取", lime, ink, enabled = !s.pending, onClick = { changeMode("ISSUE") })
+        HomeAction("归还", Color(0xFF264638), Color.White,
             enabled = !s.pending, onClick = { changeMode("RETURN") })
         if (device?.optBoolean("authorized") != true) {
-            Notice("设备${if (device?.optBoolean("registered") == true) "等待授权" else "尚未登记"}；扫码清单可保存，提交前需要完成授权。", Color(0xFFE7EBDB), ink)
-            Button(onClick = { s.settingsOpen = true }, colors = ButtonDefaults.buttonColors(containerColor = ink)) { Text("打开设备设置") }
+            Notice(if (device?.optBoolean("registered") == true) "设备等待授权" else "设备尚未登记", Color(0xFFE7EBDB), ink)
+            Button(onClick = { s.settingsOpen = true }, colors = ButtonDefaults.buttonColors(containerColor = ink)) { Text("设备设置") }
         }
-        if (s.settingsOpen) SettingsContent()
     }
 
     @Composable
-    private fun HomeAction(title: String, hint: String, background: Color, foreground: Color, enabled: Boolean, onClick: () -> Unit) {
+    private fun SearchContent() {
+        val s = state
+        val focus = LocalFocusManager.current
+        OutlinedTextField(
+            value = s.searchQuery,
+            onValueChange = { s.searchQuery = it; s.searchSubmitted = false; s.searchResults.clear(); s.error = "" },
+            label = { Text("搜索模具") },
+            placeholder = { Text("模具编号、套号或型号") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); searchMolds() }),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(onClick = { focus.clearFocus(); searchMolds() }, enabled = !s.busy,
+            colors = ButtonDefaults.buttonColors(containerColor = ink), modifier = Modifier.fillMaxWidth()) {
+            Text("查找位置")
+        }
+        if (s.busy) Text("查询中…", color = muted, fontSize = 13.sp)
+        if (s.searchSubmitted) {
+            if (s.searchResults.isEmpty()) Text("没有找到模具", color = muted)
+            else {
+                Text(if (s.searchTotal > s.searchResults.size) "共 ${s.searchTotal} 件，显示前 ${s.searchResults.size} 件；可输入更准确的编号"
+                    else "找到 ${s.searchTotal} 件", color = muted, fontSize = 13.sp)
+                s.searchResults.forEach { mold ->
+                    val location = s.locations.firstOrNull { it.code == mold.currentLocation }
+                    val locationText = if (location == null) mold.currentLocation else "${location.code} · ${location.name}"
+                    Surface(color = Color.White, shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFDCE2D8), RoundedCornerShape(10.dp))) {
+                        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(mold.code, color = ink, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                Text(moldStatusLabel(mold.status), color = if (mold.status == "READY") ink else muted,
+                                    fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                            Text("${mold.setCode} · ${mold.modelName.ifBlank { mold.modelCode }} · ${mold.size} 码",
+                                color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("当前位置", color = muted, fontSize = 12.sp, modifier = Modifier.padding(top = 7.dp))
+                            Text(locationText, color = ink, fontWeight = FontWeight.Black, fontSize = 19.sp)
+                            if (mold.status == "IN_USE" && mold.custodian != null)
+                                Text("领用人 ${mold.custodian}", color = muted, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun moldStatusLabel(status: String): String = when (status) {
+        "READY" -> "在库可领"
+        "IN_USE" -> "已领用"
+        "PENDING_INSPECTION" -> "待检"
+        "IN_REPAIR" -> "维修中"
+        "UNVERIFIED" -> "待核查"
+        "SCRAPPED" -> "已报废"
+        else -> status
+    }
+
+    @Composable
+    private fun HomeAction(title: String, background: Color, foreground: Color, enabled: Boolean, onClick: () -> Unit) {
         Button(onClick = onClick, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = background, contentColor = foreground),
-            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().height(128.dp)) {
+            shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().height(168.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column { Text(title, fontSize = 31.sp, fontWeight = FontWeight.Black); Text(hint, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp)) }
-                Text("↗", fontSize = 30.sp)
+                Text(title, fontSize = 34.sp, fontWeight = FontWeight.Black)
+                Text("→", fontSize = 28.sp)
             }
         }
     }
@@ -555,11 +702,22 @@ class MainActivity : ComponentActivity() {
         val s = state
         val needsShelf = s.mode == "RETURN" && s.targetId == null
         val shelf = s.locations.firstOrNull { it.id == s.targetId }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(if (needsShelf) "01  扫描库位" else "${if (s.mode == "RETURN") "02" else "01"}  扫描模具", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Black)
-            Surface(color = lime, shape = RoundedCornerShape(4.dp)) { Text("扫描中", color = ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)) }
+        val shownError = s.error
+        val shownMessage = s.message
+        LaunchedEffect(shownError, shownMessage) {
+            if (shownError.isNotBlank() || shownMessage.isNotBlank()) {
+                delay(if (shownError.isNotBlank()) 4_000 else 1_800)
+                if (s.error == shownError) s.error = ""
+                if (s.message == shownMessage) s.message = ""
+            }
         }
-        if (s.mode == "RETURN" && shelf != null) Notice("归还库位  ${shelf.code} · ${shelf.name}", Color(0xFFE4EBCB), ink)
+        Text(if (needsShelf) "扫描库位" else "扫描模具", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Black)
+        if (s.mode == "RETURN" && shelf != null) Surface(color = Color(0xFFE4EBCB), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(start = 13.dp, end = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("库位 ${shelf.code}", color = ink, fontWeight = FontWeight.Bold)
+                TextButton(onClick = { changeReturnShelf() }) { Text("更换", color = ink) }
+            }
+        }
         Surface(color = ink, shape = RoundedCornerShape(7.dp), modifier = Modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth().height(250.dp)) {
                 if (s.cameraVisible) QrCamera { code ->
@@ -569,34 +727,26 @@ class MainActivity : ComponentActivity() {
                         scanOrSearch(code, fromCamera = true)
                     }
                 }
-                val feedback = when {
-                    s.busy -> "识别中…"
-                    s.error.isNotBlank() -> s.error
-                    s.message.isNotBlank() -> s.message
-                    needsShelf -> "将库位二维码放入扫描框"
-                    else -> "将模具二维码放入扫描框"
-                }
-                val feedbackColor = when {
-                    s.busy -> lime
-                    s.error.isNotBlank() -> Color(0xFFFFB8A8)
-                    s.message.isNotBlank() -> lime
-                    else -> Color.White
-                }
-                Surface(color = Color(0xE6172B25), shape = RoundedCornerShape(5.dp),
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(9.dp).height(56.dp)) {
-                    Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(if (s.busy) "◌" else if (s.error.isNotBlank()) "!" else if (s.message.isNotBlank()) "✓" else "□",
-                            color = feedbackColor, fontWeight = FontWeight.Black, fontSize = 18.sp)
-                        Text(feedback, color = feedbackColor, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (s.error.isNotBlank() || s.message.isNotBlank()) {
+                    val failed = s.error.isNotBlank()
+                    val feedbackColor = if (failed) Color(0xFFFFB8A8) else lime
+                    Surface(color = Color(0xE6172B25), shape = RoundedCornerShape(5.dp),
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(9.dp).height(56.dp)) {
+                        Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (failed) "!" else "✓", color = feedbackColor, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            Text(if (failed) s.error else s.message, color = feedbackColor, fontSize = 12.sp,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
         }
-        Text("相机无法识别时，可手动输入${if (needsShelf) "库位" else "模具"}编号", color = muted, fontSize = 12.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(s.query, { s.query = it }, singleLine = true, label = { Text(if (needsShelf) "库位编号" else "模具编号") },
-                modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { s.manualEntryOpen = !s.manualEntryOpen }) { Text("手动输入", color = muted) }
+        }
+        if (s.manualEntryOpen) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(s.query, { s.query = it }, singleLine = true, label = { Text(if (needsShelf) "库位编号" else "模具编号") }, modifier = Modifier.weight(1f))
             Button(onClick = { scanOrSearch(s.query) }, enabled = !s.busy, colors = ButtonDefaults.buttonColors(containerColor = ink)) { Text("确认") }
         }
         if (!needsShelf) {
@@ -606,7 +756,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        CartContent()
+        if (!needsShelf) CartContent()
         if (s.cart.isNotEmpty() || s.targetId != null) TextButton(onClick = { s.clearConfirmVisible = true }) {
             Text("清空本次作业", color = Color(0xFF9B3B2A))
         }
@@ -616,14 +766,12 @@ class MainActivity : ComponentActivity() {
     private fun CartContent() {
         val s = state
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("已扫描清单", color = ink, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text("已扫模具", color = ink, fontSize = 18.sp, fontWeight = FontWeight.Black)
             Text("${s.cart.size} 件", color = muted, fontWeight = FontWeight.Bold)
         }
-        if (s.cart.isEmpty()) Notice("扫到的模具会一行一行出现在这里", Color(0xFFEBEEE3), muted)
-        s.cart.forEachIndexed { index, mold ->
+        s.cart.forEach { mold ->
             Surface(color = Color.White, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFDCE2D8), RoundedCornerShape(6.dp))) {
                 Row(Modifier.padding(11.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${index + 1}", color = ink, fontWeight = FontWeight.Black, modifier = Modifier.background(lime, RoundedCornerShape(3.dp)).padding(horizontal = 8.dp, vertical = 5.dp))
                     Column(Modifier.weight(1f)) {
                         Text(mold.code, color = ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         Text("${mold.setCode} · ${mold.modelCode} · ${mold.size}", color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -687,11 +835,18 @@ class MainActivity : ComponentActivity() {
         var workOpen by mutableStateOf(false)
         var confirmVisible by mutableStateOf(false)
         var clearConfirmVisible by mutableStateOf(false)
+        var changeShelfConfirmVisible by mutableStateOf(false)
+        var manualEntryOpen by mutableStateOf(false)
         var settingsOpen by mutableStateOf(api.baseUrl.isBlank())
+        var searchOpen by mutableStateOf(false)
+        var searchQuery by mutableStateOf("")
+        var searchTotal by mutableStateOf(0)
+        var searchSubmitted by mutableStateOf(false)
         var lastScan = ""
         var lastScanAt = 0L
         val locations = mutableStateListOf<Location>()
         val results = mutableStateListOf<Mold>()
+        val searchResults = mutableStateListOf<Mold>()
         val cart = mutableStateListOf<Mold>()
     }
 }

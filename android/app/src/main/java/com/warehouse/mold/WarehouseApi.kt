@@ -23,7 +23,7 @@ data class Mold(
     val id: Int, val code: String, val setCode: String, val modelCode: String,
     val size: String, val status: String, val version: Int,
     val currentLocation: String, val defaultLocationId: Int, val defaultLocation: String,
-    val custodian: String?
+    val custodian: String?, val modelName: String
 ) {
     companion object {
         fun from(json: JSONObject) = Mold(
@@ -31,10 +31,13 @@ data class Mold(
             json.getString("model_code"), json.getString("size_label"), json.getString("status"),
             json.getInt("version"), json.getString("current_location"),
             json.getInt("default_location_id"), json.getString("default_location"),
-            json.optString("custodian").takeIf { it.isNotBlank() && it != "null" }
+            json.optString("custodian").takeIf { it.isNotBlank() && it != "null" },
+            json.optString("name")
         )
     }
 }
+
+data class MoldSearch(val total: Int, val items: List<Mold>)
 
 data class Location(val id: Int, val code: String, val name: String, val type: String, val active: Boolean) {
     companion object {
@@ -42,7 +45,7 @@ data class Location(val id: Int, val code: String, val name: String, val type: S
     }
 }
 
-class ApiFailure(val status: Int, message: String) : Exception(message)
+class ApiFailure(val status: Int, val code: String?, message: String) : Exception(message)
 
 class WarehouseApi(context: Context) {
     private val prefs = context.getSharedPreferences("warehouse_client", Context.MODE_PRIVATE)
@@ -78,6 +81,11 @@ class WarehouseApi(context: Context) {
         val encoded = java.net.URLEncoder.encode(query, "UTF-8")
         val result = request("GET", "/api/molds?q=$encoded&limit=30")
         return result.getJSONArray("items").objects().map { Mold.from(it) }
+    }
+    fun searchMolds(query: String): MoldSearch {
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val result = request("GET", "/api/molds?q=$encoded&limit=50")
+        return MoldSearch(result.getInt("total"), result.getJSONArray("items").objects().map { Mold.from(it) })
     }
     fun scan(raw: String): JSONObject = request("POST", "/api/scan/resolve", JSONObject().put("raw_code", raw))
     fun submit(requestId: String, mode: String, targetId: Int, molds: List<Mold>): JSONObject {
@@ -125,8 +133,9 @@ class WarehouseApi(context: Context) {
             saveCookies()
             val text = (if (status in 200..299) connection.inputStream else connection.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status !in 200..299) {
-                val message = runCatching { JSONObject(text).getJSONObject("detail").getString("message") }.getOrDefault("请求失败（$status）")
-                throw ApiFailure(status, message)
+                val detail = runCatching { JSONObject(text).getJSONObject("detail") }.getOrNull()
+                val message = detail?.optString("message")?.takeIf { it.isNotBlank() } ?: "请求失败（$status）"
+                throw ApiFailure(status, detail?.optString("error_code"), message)
             }
             return text
         } finally { connection.disconnect() }

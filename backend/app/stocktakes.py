@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from .auth import AuthContext, api_error, current_context, get_db, require_admin, require_csrf, require_device, require_operator
+from .capacity import ensure_shelf_capacity
 from .models import AuditLog, Location, Mold, Operation, OperationItem, StocktakeAdjustment, StocktakeExpected, StocktakeScan, StocktakeSession, utc_now
 from .operations import response_for
 
@@ -294,6 +295,7 @@ def resolve_stocktake(session_id: int, payload: ResolutionInput, context: AuthCo
             raise api_error(409, "WRONG_LOCATION_FINDING_INVALID", "该模具不符合库位错位调整条件")
         new_status = mold.status
 
+    ensure_shelf_capacity(db, locations, [(mold.current_location_id, target_id)])
     before_status = mold.status
     before_location = mold.current_location_id
     before_custodian = mold.custodian_person_id

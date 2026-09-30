@@ -49,7 +49,7 @@ try {
             & $python -m alembic upgrade head
         } finally { $ErrorActionPreference = $previousPreference }
         if ($LASTEXITCODE -ne 0) { throw '空试点库迁移失败。' }
-        Write-Output '请为新试点库设置 admin 密码（至少 12 个字符）。输入时会显示 *，输完按回车。'
+        Write-Output '请为新试点库设置 admin 密码（至少 6 个字符）。输入时会显示 *，输完按回车。'
         $previousPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = 'Continue'

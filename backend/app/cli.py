@@ -23,8 +23,8 @@ def assert_development() -> None:
 def create_user(username: str, person_name: str | None, role: str) -> None:
     password = read_password("新账号密码（输入时显示 *）：")
     confirm = read_password("再次输入（输入时显示 *）：")
-    if password != confirm or len(password) < 12:
-        raise SystemExit("密码不一致，或少于 12 个字符")
+    if password != confirm or len(password) < 6:
+        raise SystemExit("密码不一致，或少于 6 个字符")
     engine = make_engine()
     factory = make_session_factory(engine)
     with factory() as db:

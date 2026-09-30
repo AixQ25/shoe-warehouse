@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import AuthContext, api_error, current_context, get_db, require_admin, require_csrf
+from .capacity import ensure_shelf_capacity
 from .models import AuditLog, AuthorizedDevice, LabelPrintBatch, Location, LoginSession, Mold, MoldModel, MoldSet, Operation, OperationItem, Person, StocktakeAdjustment, StocktakeExpected, StocktakeScan, StocktakeSession, User, utc_now
 
 router = APIRouter(prefix="/api", tags=["catalog"])
@@ -350,6 +351,7 @@ def create_mold(payload: MoldInput, context: AuthContext = Depends(require_csrf)
     current_count = len(db.scalars(select(Mold).where(Mold.set_id == mold_set.id, Mold.is_current.is_(True))).all())
     if current_count >= 10:
         raise api_error(409, "SET_FULL", "该套已有 10 个有效模具")
+    ensure_shelf_capacity(db, {location.id: location}, [(None, location.id)])
     mold = Mold(**payload.model_dump(), is_current=True, version=1)
     db.add(mold)
     flush_or_conflict(db, "MOLD_CONFLICT", "模具编号或套内尺码重复")

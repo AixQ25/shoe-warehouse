@@ -19,10 +19,10 @@ def main() -> None:
     args = parser.parse_args()
     database = args.database.resolve()
     inspect_database(database)
-    new_password = read_password("请输入新的 admin 密码（至少 12 个字符，输入时显示 *）：")
+    new_password = read_password("请输入新的 admin 密码（至少 6 个字符，输入时显示 *）：")
     confirm = read_password("再输入一次（输入时显示 *）：")
-    if len(new_password) < 12 or new_password != confirm:
-        raise SystemExit("密码不足 12 个字符或两次输入不一致；数据库未修改")
+    if len(new_password) < 6 or new_password != confirm:
+        raise SystemExit("密码不足 6 个字符或两次输入不一致；数据库未修改")
     saved = backup_database(database, args.backup_directory)
     with closing(sqlite3.connect(database)) as db:
         db.execute("PRAGMA foreign_keys=ON")
