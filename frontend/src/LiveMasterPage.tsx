@@ -62,8 +62,8 @@ export default function LiveMasterPage({ user, locations, molds, onChanged }: { 
     finally { setBusy(false) }
   }
 
-  async function remove(path: string, label: string, onSuccess?: () => void) {
-    if (!window.confirm(`确定删除${label}？删除后不能撤销。`)) return
+  async function remove(path: string, label: string, onSuccess?: () => void, confirmation?: string) {
+    if (!window.confirm(confirmation ?? `确定删除${label}？删除后不能撤销。`)) return
     setBusy(true); setError(''); setMessage('')
     try {
       await api(path, { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken() } })
@@ -75,7 +75,8 @@ export default function LiveMasterPage({ user, locations, molds, onChanged }: { 
   }
 
   const shelves = locations.filter((item) => item.active && item.type === 'SHELF')
-  const visibleLocations = locations.filter((item) => `${item.code} ${item.name} ${locationTypeNames[item.type] ?? item.type}`.toLowerCase().includes(locationQuery.trim().toLowerCase()))
+  const managedLocations = locations.filter((item) => item.type !== 'LINE' || item.active)
+  const visibleLocations = managedLocations.filter((item) => `${item.code} ${item.name} ${locationTypeNames[item.type] ?? item.type}`.toLowerCase().includes(locationQuery.trim().toLowerCase()))
   const visibleMolds = molds.filter((item) => `${item.code} ${item.set_code} ${item.model_code} ${item.size_label}`.toLowerCase().includes(moldQuery.trim().toLowerCase()))
   function clearLocationSelections(locationId: number) {
     for (const clear of [setDefaultLocationId, setMoldLocationId, setNewDefaultId]) clear((current) => current === String(locationId) ? '' : current)
@@ -112,12 +113,12 @@ export default function LiveMasterPage({ user, locations, molds, onChanged }: { 
       <form className="card management-card" onSubmit={(event) => { event.preventDefault(); void submit(`/sets/${defaultSetId}/default-location`, { location_id: Number(newDefaultId), reason }, '默认库位已修改；实物位置未改变', 'PATCH') }}><h2>调整默认库位</h2><label>模具套<select value={defaultSetId} onChange={(event) => setDefaultSetId(event.target.value)} required><option value="">选择模具套</option>{sets.map((item) => <option value={item.id} key={item.id}>{item.code} · 当前 {item.default_location}</option>)}</select></label><label>新默认库位<select value={newDefaultId} onChange={(event) => setNewDefaultId(event.target.value)} required>{locationOptions}</select></label><label>原因<input value={reason} onChange={(event) => setReason(event.target.value)} minLength={3} required /></label><p>此操作只改变归还提示，不代表实物已搬动。</p><button className="primary-button" disabled={busy}>确认调整</button></form>
     </div>}
     <section className="card management-list">
-      <h2>现有资料</h2><p>人员 {people.length} · 位置 {locations.length} · 型号 {models.length} · 模具套 {sets.length} · 单模具 {molds.length}</p>
+      <h2>现有资料</h2><p>人员 {people.length} · 位置 {managedLocations.length} · 型号 {models.length} · 模具套 {sets.length} · 单模具 {molds.length}</p>
     </section>
     <section className="card management-list">
-      <h2>位置管理</h2><p>建错且尚未被业务使用的位置可删除；已关联模具套、模具、盘点、标签或流转记录的位置不能删除。</p>
+      <h2>位置管理</h2><p>产线均可删除，历史流转记录会保留。其他位置仅在尚未被业务使用时可删除。</p>
       <input className="management-search" aria-label="搜索位置" placeholder="搜索位置编号或名称" value={locationQuery} onChange={(event) => setLocationQuery(event.target.value)} />
-      <div className="management-set-list">{visibleLocations.map((location) => <div key={location.id}><strong>{location.code}</strong><span>{location.name} · {locationTypeNames[location.type] ?? location.type}{location.active ? '' : ' · 已停用'}</span>{user.role === 'ADMIN' && <button className="management-delete" type="button" disabled={busy} onClick={() => void remove(`/locations/${location.id}`, `位置 ${location.code}`, () => clearLocationSelections(location.id))}>删除</button>}</div>)}{!visibleLocations.length && !loading && <EmptyState>没有匹配的位置</EmptyState>}</div>
+      <div className="management-set-list">{visibleLocations.map((location) => <div key={location.id}><strong>{location.code}</strong><span>{location.name} · {locationTypeNames[location.type] ?? location.type}{location.active ? '' : ' · 已停用'}</span>{user.role === 'ADMIN' && <button className="management-delete" type="button" disabled={busy} onClick={() => void remove(`/locations/${location.id}`, `${locationTypeNames[location.type] ?? '位置'} ${location.code}`, () => clearLocationSelections(location.id), location.type === 'LINE' ? `确定删除产线 ${location.code}？历史流转记录会保留，仍在该产线的模具可继续归还或转出。` : undefined)}>删除</button>}</div>)}{!visibleLocations.length && !loading && <EmptyState>没有匹配的位置</EmptyState>}</div>
     </section>
     <section className="card management-list">
       <h2>型号</h2><div className="management-set-list">{models.map((item) => <div key={item.id}><strong>{item.code}</strong><span>{item.name}</span>{user.role === 'ADMIN' && <button className="management-delete" type="button" disabled={busy} onClick={() => void remove(`/models/${item.id}`, `型号 ${item.code}`, () => setModelId((current) => current === String(item.id) ? '' : current))}>删除</button>}</div>)}{!models.length && !loading && <EmptyState>暂无型号资料</EmptyState>}</div>

@@ -45,4 +45,13 @@ def make_engine(url: str | URL | None = None) -> Engine:
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(engine, expire_on_commit=False)
+    factory = sessionmaker(engine, expire_on_commit=False)
+
+    @event.listens_for(factory, "after_begin")
+    def lock_sqlite_write(session, _transaction, connection):  # type: ignore[no-untyped-def]
+        # Acquire SQLite's writer reservation before authentication or business
+        # reads. FOR UPDATE alone has no effect on SQLite.
+        if session.info.get("write_request") and connection.dialect.name == "sqlite":
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+    return factory

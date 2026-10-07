@@ -10,21 +10,39 @@ export interface LineSummary { line_id: number; line_code: string; sets: { set_c
 export const stateNames: Record<string, string> = { NOT_REGISTERED: '未建档', READY: '在库可用', IN_USE: '产线领用', PENDING_INSPECTION: '待检', IN_REPAIR: '维修中', UNVERIFIED: '待核查', SCRAPPED: '已报废' }
 export const kindNames: Record<string, string> = { INITIALIZE: '初始建档', ISSUE: '领用', RETURN: '归还', MOVE: '移库', TRANSFER: '转线', CORRECTION: '补偿更正', STOCKTAKE_ADJUST: '盘点调整', RETURN_FOR_INSPECTION: '异常归还待检', SEND_REPAIR: '送修', REPAIR_COMPLETE: '维修完成', INSPECTION_PASS: '检验通过', SCRAP: '报废', FOUND: '核查找回' }
 
+export class ApiError extends Error {
+  status: number
+  code?: string
+  constructor(message: string, status: number, code?: string) { super(message); this.status = status; this.code = code }
+}
+
+export function rejectedSubmission(cause: unknown): boolean {
+  return cause instanceof ApiError && [400, 404, 409, 422].includes(cause.status) && !['REQUEST_ID_CONFLICT', 'REQUEST_CONFLICT'].includes(cause.code ?? '')
+}
+
+export function sessionExpired(cause: unknown): boolean {
+  return cause instanceof ApiError && (cause.status === 401 || ['ACCOUNT_DISABLED', 'CSRF_FAILED'].includes(cause.code ?? ''))
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 20_000)
   try {
-    response = await fetch(`/api${path}`, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
-  } catch {
-    throw new Error('无法连接仓库服务。请先启动后端，再刷新页面。')
-  }
-  if (!response.ok) {
-    if ([502, 503, 504].includes(response.status)) {
-      throw new Error(`仓库服务未启动或暂时不可用，请启动仓库服务后重试（${response.status}）`)
+    let response: Response
+    try {
+      response = await fetch(`/api${path}`, { credentials: 'same-origin', ...init, signal: init?.signal ?? controller.signal, headers: { 'Content-Type': 'application/json', ...init?.headers } })
+    } catch {
+      throw new Error(controller.signal.aborted ? '请求超时。库存提交结果可能尚未确认，请查询原请求结果。' : '无法连接仓库服务。请检查网络和电脑服务。')
     }
-    const body = await response.json().catch(() => null) as { detail?: { message?: string } } | null
-    throw new Error(body?.detail?.message ?? `请求失败（${response.status}）`)
-  }
-  return response.json() as Promise<T>
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { detail?: { message?: string; error_code?: string } } | null
+      const fallback = [502, 503, 504].includes(response.status) ? `仓库服务暂时不可用，请稍后重试（${response.status}）` : `请求失败（${response.status}）`
+      const error = new ApiError(body?.detail?.message ?? fallback, response.status, body?.detail?.error_code)
+      if (sessionExpired(error) && error.code !== 'BAD_CREDENTIALS') window.dispatchEvent(new Event('warehouse-session-expired'))
+      throw error
+    }
+    return await response.json() as T
+  } finally { window.clearTimeout(timeout) }
 }
 
 export function csrfToken() {

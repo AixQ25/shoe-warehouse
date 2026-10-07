@@ -207,6 +207,14 @@ def delete_location(location_id: int, context: AuthContext = Depends(require_csr
     location = db.scalar(select(Location).where(Location.id == location_id).with_for_update())
     if location is None:
         raise api_error(404, "LOCATION_NOT_FOUND", "位置不存在")
+    if location.type == "LINE":
+        # Retain the location identity for historical movements and molds that
+        # have not yet been returned. Inactive lines cannot receive new stock.
+        if location.active:
+            location.active = False
+            db.add(AuditLog(actor_user_id=context.user.id, action="LOCATION_DELETE", entity=location.code, before=location.name, after="已删除产线，保留历史记录"))
+            save_or_conflict(db, "LOCATION_CONFLICT", "产线删除发生冲突，请刷新后重试")
+        return {"id": location_id, "code": location.code, "active": False}
     references = (
         (MoldSet, MoldSet.default_location_id == location_id, "模具套的默认库位"),
         (Mold, Mold.current_location_id == location_id, "模具的当前位置"),
@@ -339,8 +347,8 @@ def mold_detail(mold_id: int, _context: AuthContext = Depends(current_context), 
 @router.post("/molds")
 def create_mold(payload: MoldInput, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
     require_admin(context)
-    mold_set = db.scalar(select(MoldSet).where(MoldSet.id == payload.set_id).with_for_update())
     location = db.scalar(select(Location).where(Location.id == payload.current_location_id).with_for_update().execution_options(populate_existing=True))
+    mold_set = db.scalar(select(MoldSet).where(MoldSet.id == payload.set_id).with_for_update())
     if mold_set is None or not mold_set.active or location is None or not location.active:
         raise api_error(422, "MOLD_REFERENCE_INVALID", "模具套或位置无效")
     frozen = db.scalar(select(StocktakeSession.id).where(StocktakeSession.location_id == location.id, StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"])).limit(1))
@@ -399,6 +407,8 @@ def resolve_scan(payload: ScanInput, _context: AuthContext = Depends(current_con
         location = db.scalar(select(Location).where(func.upper(Location.code) == code))
         if location is None:
             raise api_error(404, "LOCATION_NOT_FOUND", "找不到这个库位")
+        if not location.active:
+            raise api_error(422, "LOCATION_INACTIVE", "这个位置已删除或停用")
         return {"kind": "LOCATION", "location": {"id": location.id, "code": location.code, "name": location.name, "type": location.type}}
     elif ":" in raw:
         raise api_error(422, "SCAN_PREFIX_INVALID", "二维码类型无法识别")
@@ -406,6 +416,8 @@ def resolve_scan(payload: ScanInput, _context: AuthContext = Depends(current_con
         code = raw
         location = db.scalar(select(Location).where(func.upper(Location.code) == code))
         if location is not None:
+            if not location.active:
+                raise api_error(422, "LOCATION_INACTIVE", "这个位置已删除或停用")
             return {"kind": "LOCATION", "location": {"id": location.id, "code": location.code, "name": location.name, "type": location.type}}
     mold = db.scalar(select(Mold).where(func.upper(Mold.code) == code, Mold.is_current.is_(True)))
     if mold is None:

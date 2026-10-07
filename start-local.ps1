@@ -2,6 +2,8 @@
 
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Default test entries use HTTP; do not inherit optional HTTPS settings.
+Remove-Item Env:WAREHOUSE_HTTPS_CERT, Env:WAREHOUSE_HTTPS_KEY -ErrorAction SilentlyContinue
 $backend = Join-Path $project 'backend'
 $frontend = Join-Path $project 'frontend'
 $localData = [Environment]::GetFolderPath('LocalApplicationData')
@@ -127,7 +129,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $frontend 'node_modules\.bin\vite.cm
 
 if (-not $apiReady) {
     $env:WAREHOUSE_INSTANCE_ID = [guid]::NewGuid().ToString('N')
-    $apiProcess = Start-Process -FilePath $python -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000') -WorkingDirectory $backend -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'backend.out.log') -RedirectStandardError (Join-Path $logDirectory 'backend.err.log')
+    $apiProcess = Start-Process -FilePath $python -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--proxy-headers', '--forwarded-allow-ips', '127.0.0.1') -WorkingDirectory $backend -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logDirectory 'backend.out.log') -RedirectStandardError (Join-Path $logDirectory 'backend.err.log')
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Milliseconds 500
         $apiHealth = Get-WarehouseHealth 'http://127.0.0.1:8000/api/health'
@@ -166,6 +168,6 @@ if ($webProcess) {
 Write-Output "Open $webUrl and sign in with the existing account. Database: $warehouseDatabase"
 if ($Lan) {
     [System.Net.Dns]::GetHostAddresses([System.Net.Dns]::GetHostName()) | Where-Object { $_.AddressFamily -eq 'InterNetwork' -and -not [System.Net.IPAddress]::IsLoopback($_) } | ForEach-Object { Write-Output "Phone on the same LAN: http://$($_.IPAddressToString):$webPort/?view=mobile" }
-    Write-Output 'HTTP supports lookup and QR photo recognition. Live camera scanning requires trusted HTTPS.'
+    Write-Output 'LAN testing uses HTTP without a CA installation. Browser live-camera scanning requires trusted HTTPS; the native Android camera works with HTTP.'
 }
 if ($OpenBrowser) { Start-Process $webUrl }

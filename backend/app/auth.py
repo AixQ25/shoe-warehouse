@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from .database import make_session_factory
@@ -48,7 +48,14 @@ def api_error(status: int, code: str, message: str) -> HTTPException:
 def get_db(request: Request):  # type: ignore[no-untyped-def]
     factory = request.app.state.session_factory
     with factory() as db:
-        yield db
+        db.info["write_request"] = request.method not in {"GET", "HEAD", "OPTIONS"}
+        try:
+            yield db
+        except OperationalError as error:
+            db.rollback()
+            if db.bind.dialect.name == "sqlite" and any(message in str(error.orig).lower() for message in ("locked", "busy")):
+                raise HTTPException(503, detail={"error_code": "DATABASE_BUSY", "message": "仓库正在处理其他操作，请稍后按原请求编号重试"}, headers={"Retry-After": "1"}) from None
+            raise
 
 
 @dataclass
@@ -141,7 +148,7 @@ def login(payload: LoginInput, response: Response, request: Request, db: Session
     csrf_token = secrets.token_urlsafe(32)
     db.add(LoginSession(user_id=user.id, token_hash=token_hash(session_token), csrf_hash=token_hash(csrf_token), expires_at=utc_now() + timedelta(hours=12)))
     db.commit()
-    secure = request.app.state.cookie_secure
+    secure = request.app.state.cookie_secure or request.url.scheme == "https"
     response.set_cookie(SESSION_COOKIE, session_token, max_age=43200, httponly=True, secure=secure, samesite="lax", path="/")
     response.set_cookie(CSRF_COOKIE, csrf_token, max_age=43200, httponly=False, secure=secure, samesite="lax", path="/")
     return {"id": user.id, "username": user.username, "role": user.role, "person": user.person.name if user.person else None, "csrf_token": csrf_token}
@@ -282,7 +289,7 @@ def register_device(payload: DeviceInput, request: Request, response: Response, 
     device = AuthorizedDevice(user_id=context.user.id, label=payload.label.strip(), token_hash=token_hash(raw), authorized=False)
     db.add(device)
     db.commit()
-    response.set_cookie(DEVICE_COOKIE, raw, max_age=60 * 60 * 24 * 180, httponly=True, secure=request.app.state.cookie_secure, samesite="lax", path="/")
+    response.set_cookie(DEVICE_COOKIE, raw, max_age=60 * 60 * 24 * 180, httponly=True, secure=request.app.state.cookie_secure or request.url.scheme == "https", samesite="lax", path="/")
     return {"id": device.id, "label": device.label, "authorized": False}
 
 

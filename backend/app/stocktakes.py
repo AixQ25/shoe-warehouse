@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
@@ -90,7 +90,8 @@ def lock_session(db: Session, session_id: int) -> StocktakeSession:
 
 @router.get("")
 def list_stocktakes(_context: AuthContext = Depends(current_context), db: Session = Depends(get_db)) -> list[dict]:
-    sessions = db.scalars(select(StocktakeSession).order_by(StocktakeSession.id.desc()).limit(50)).all()
+    recent = select(StocktakeSession.id).order_by(StocktakeSession.id.desc()).limit(50)
+    sessions = db.scalars(select(StocktakeSession).where(or_(StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"]), StocktakeSession.id.in_(recent))).order_by(StocktakeSession.id.desc())).all()
     return [detail_dict(item) for item in sessions]
 
 
@@ -154,7 +155,7 @@ def scan_stocktake(session_id: int, payload: ScanInput, request: Request, contex
     previous = db.scalar(select(StocktakeScan).where(StocktakeScan.session_id == session.id, StocktakeScan.code == code))
     if previous is not None:
         return {"kind": "ALREADY_SCANNED", "result": previous.result, "stocktake": detail_dict(session)}
-    mold = db.scalar(select(Mold).where(Mold.code == code, Mold.is_current.is_(True)))
+    mold = db.scalar(select(Mold).where(func.upper(Mold.code) == code, Mold.is_current.is_(True)))
     expected_ids = {item.mold_id for item in session.expected}
     result = "UNKNOWN" if mold is None else "EXPECTED" if mold.id in expected_ids else "WRONG_LOCATION"
     db.add(StocktakeScan(session=session, code=code, mold_id=mold.id if mold else None, result=result, scanned_by_user_id=context.user.id))

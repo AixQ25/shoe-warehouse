@@ -137,6 +137,62 @@ class CoreFlowTest(unittest.TestCase):
         recreated = self.admin.post("/api/locations", json={"type": "SHELF", "zone": "B", "rack": "1", "level": "1"}, headers=headers)
         self.assertEqual(recreated.status_code, 200, recreated.text)
 
+    def test_line_deletion_keeps_movements_and_allows_remaining_molds_to_leave(self) -> None:
+        admin_csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        worker_csrf = self.login(self.worker, "zhangsan", "StrongWorkerPass-123")
+        headers = {"X-CSRF-Token": admin_csrf}
+        device = self.worker.post("/api/devices/register", json={"label": "产线删除测试手机"}, headers={"X-CSRF-Token": worker_csrf})
+        self.assertEqual(device.status_code, 200, device.text)
+        self.assertEqual(self.admin.post(f"/api/devices/{device.json()['id']}/authorize", headers=headers).status_code, 200)
+        issued = self.submit("ISSUE", self.line, [1, 2], [1, 1], worker_csrf)
+        self.assertEqual(issued.status_code, 200, issued.text)
+        original = issued.json()
+        printed = self.admin.post("/api/labels/print-record", json={"request_id": str(uuid4()), "kind": "LOCATION", "codes": ["产线01"], "purpose": "INITIAL"}, headers=headers)
+        self.assertEqual(printed.status_code, 200, printed.text)
+
+        self.assertEqual(self.worker.delete(f"/api/locations/{self.line}", headers={"X-CSRF-Token": worker_csrf}).status_code, 403)
+        deleted = self.admin.delete(f"/api/locations/{self.line}", headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(self.admin.delete(f"/api/locations/{self.line}", headers=headers).status_code, 200)
+        archived = next(item for item in self.admin.get("/api/locations").json() if item["id"] == self.line)
+        self.assertFalse(archived["active"])
+        self.assertEqual((archived["code"], archived["name"]), ("产线01", "产线01"))
+        self.assertFalse(any(item["line_id"] == self.line for item in self.admin.get("/api/production-lines/summary").json()))
+        self.assertEqual(self.admin.get("/api/operations").json(), [original])
+        self.assertEqual(self.admin.get(f"/api/operations/{original['id']}").json(), original)
+        self.assertEqual(self.worker.get(f"/api/operations/by-request/{original['request_id']}").json(), original)
+        self.assertEqual(self.admin.get("/api/labels/print-records").json(), [printed.json()])
+        exported = self.admin.get("/api/exports/operations")
+        self.assertEqual(exported.status_code, 200, exported.text)
+        self.assertIn("产线01", exported.text)
+        molds = self.admin.get("/api/molds").json()["items"]
+        for mold in [item for item in molds if item["id"] in [1, 2]]:
+            self.assertEqual((mold["current_location_id"], mold["current_location"], mold["status"], mold["version"]), (self.line, "产线01", "IN_USE", 2))
+        for code in ["LOC:产线01", "产线01"]:
+            rejected = self.admin.post("/api/scan/resolve", json={"raw_code": code})
+            self.assertEqual(rejected.status_code, 422, rejected.text)
+            self.assertEqual(rejected.json()["detail"]["error_code"], "LOCATION_INACTIVE")
+        self.assertEqual(self.submit("ISSUE", self.line, [3], [1], worker_csrf).status_code, 422)
+        self.assertEqual(self.submit("TRANSFER", self.line, [1], [2], worker_csrf).status_code, 422)
+
+        transferred = self.submit("TRANSFER", self.line_two, [1], [2], worker_csrf)
+        self.assertEqual(transferred.status_code, 200, transferred.text)
+        self.assertEqual(transferred.json()["items"][0]["before_location_id"], self.line)
+        returned = self.submit("RETURN", self.shelf_a, [2], [2], worker_csrf)
+        self.assertEqual(returned.status_code, 200, returned.text)
+        self.assertEqual(returned.json()["items"][0]["before_location_id"], self.line)
+        self.assertEqual(self.admin.get(f"/api/operations/{original['id']}").json(), original)
+
+    def test_unused_line_can_be_deleted(self) -> None:
+        csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
+        deleted = self.admin.delete(f"/api/locations/{self.line_two}", headers={"X-CSRF-Token": csrf})
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse(any(item["line_id"] == self.line_two for item in self.admin.get("/api/production-lines/summary").json()))
+        with self.factory() as db:
+            line = db.get(Location, self.line_two)
+            self.assertIsNotNone(line)
+            self.assertFalse(line.active)
+
     def test_new_basic_records_can_be_deleted_in_dependency_order(self) -> None:
         csrf = self.login(self.admin, "admin", "StrongAdminPass-123")
         headers = {"X-CSRF-Token": csrf}

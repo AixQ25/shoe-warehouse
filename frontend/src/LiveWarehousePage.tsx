@@ -1,6 +1,6 @@
 import { newRequestId } from './requestId'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, csrfToken, kindNames, localTime } from './liveApi'
+import { api, csrfToken, kindNames, localTime, sessionExpired } from './liveApi'
 import type { DashboardSummary, LineSummary, LiveMold, LiveOperation, Location, MoldPage, SessionUser, SetSummary } from './liveApi'
 import LiveWorkPage from './LiveWorkPage'
 import LiveStocktakePage from './LiveStocktakePage'
@@ -40,6 +40,11 @@ export default function LiveWarehousePage({ tab, onTabChange }: { tab: LiveTab; 
   const [query, setQuery] = useState('')
   const [recordQuery, setRecordQuery] = useState('')
   const [recordType, setRecordType] = useState('')
+  useEffect(() => {
+    const expired = () => { setUser(null); setError('登录已失效，请重新登录；待确认请求已保留') }
+    window.addEventListener('warehouse-session-expired', expired)
+    return () => window.removeEventListener('warehouse-session-expired', expired)
+  }, [])
   const refresh = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true)
     setError('')
@@ -106,16 +111,16 @@ export default function LiveWarehousePage({ tab, onTabChange }: { tab: LiveTab; 
   async function logout() {
     try {
       await api('/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken() } })
-      setUser(null)
-      setLocations([])
-      setMolds([])
-      setOperations([])
-      setDashboard(null)
-      setSets([])
-      setLines([])
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '退出失败')
+      if (!sessionExpired(cause)) { setError(cause instanceof Error ? cause.message : '退出失败'); return }
     }
+    setUser(null)
+    setLocations([])
+    setMolds([])
+    setOperations([])
+    setDashboard(null)
+    setSets([])
+    setLines([])
   }
 
   function openOperation(id: number) {

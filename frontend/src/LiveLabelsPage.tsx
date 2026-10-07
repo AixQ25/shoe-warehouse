@@ -48,7 +48,6 @@ export default function LiveLabelsPage({ molds, locations }: { molds: LiveMold[]
     const lookup = code.trim().toUpperCase()
     const selected = mode === 'SET' ? molds.filter((item) => item.set_code.toUpperCase() === lookup).map((item) => item.code) : [mode === 'MOLD' ? molds.find((item) => item.code.toUpperCase() === lookup)?.code : locations.find((item) => item.code.toUpperCase() === lookup && item.active)?.code]
     if (!lookup || selected.length === 0 || selected.some((item) => !item)) { setNotice('没有找到所选编号，请从列表中选择'); return }
-    if (mode === 'SET' && selected.length !== 10) { setNotice('该套当前不是 10 个有效模具，请先核对档案'); return }
     setBusy(true)
     setNotice('')
     try {

@@ -32,6 +32,7 @@ $env:DATABASE_URL = 'sqlite+pysqlite:///' + (((Resolve-Path '..\office-pilot-dat
 - `/api/auth/users`、`/api/auth/audit`：维护员开户、停用/启用、密码重置与最近审计；停用或重置会撤销既有登录和设备授权。
 - `/api/devices`：作业设备登记、当前浏览器状态查询、维护员授权及撤销。登录和已授权设备同时有效才允许库存写操作。
 - `/api/people`、`/api/locations`、`/api/models`、`/api/sets`、`/api/molds`：基础资料查询和维护员建档。
+- `DELETE /api/locations/{id}`：维护员可删除任意产线，包括有流转、标签记录或仍有模具的产线。产线以 `active=false` 保留档案，管理列表、产线看板和新作业目标不再显示；历史单据与导出仍保留原产线编号，原有模具可继续归还或转出。`GET /api/locations` 保留这些档案供历史详情解析；原编号继续保留。其他位置仍仅允许删除尚无业务引用的档案。
 - `PATCH /api/people/{id}/active`、`PATCH /api/sets/{id}/default-location`：带原因停用/启用人员及调整套的默认库位；修改默认库位不会移动实物。
 - `/api/scan/resolve`：解析模具码和库位码。
 - `/api/dashboard`、`/api/set-matrix`、`/api/production-lines/summary`：看板汇总。
@@ -56,3 +57,5 @@ python -m unittest discover -s tests -v
 ```
 
 测试使用独立 SQLite，不写开发库。覆盖设备授权、领还及版本冲突、整套换位、混合归还、补偿更正、账号管理、盘点、CSV 导入导出与标签记录等。迁移使用临时 SQLite 验证升级和回退。PostgreSQL 仍需同版本环境验证。
+
+SQLite 的 API 写事务在业务读取前使用 `BEGIN IMMEDIATE`，串行保护库位容量、盘点快照和冻结；锁等待失败返回 `503 DATABASE_BUSY` 及 `Retry-After`，客户端应保留原请求重试。盘点列表始终包含未结束任务，并补充最近 50 条记录。HTTPS 代理请求的会话和设备 Cookie 使用 Secure；本机 5173 仅绑定回环地址，可信局域网测试的手机默认走 5174 HTTP，可选 HTTPS 入口为 5175。

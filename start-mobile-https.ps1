@@ -7,7 +7,17 @@ $dataDirectory = Join-Path $env:LOCALAPPDATA 'mold-warehouse-dev'
 $certDirectory = Join-Path $dataDirectory 'certs'
 $logDirectory = Join-Path $dataDirectory 'logs'
 $python = Join-Path $env:LOCALAPPDATA 'mold-warehouse-venv\Scripts\python.exe'
-$openssl = 'C:\Program Files\Git\mingw64\bin\openssl.exe'
+$gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
+$opensslCommand = Get-Command openssl.exe -ErrorAction SilentlyContinue
+$opensslCandidates = @()
+if ($opensslCommand) { $opensslCandidates += $opensslCommand.Source }
+if ($gitCommand) {
+    $gitRoot = Split-Path -Parent (Split-Path -Parent $gitCommand.Source)
+    $opensslCandidates += Join-Path $gitRoot 'mingw64\bin\openssl.exe'
+    $opensslCandidates += Join-Path $gitRoot 'usr\bin\openssl.exe'
+}
+$opensslCandidates += 'C:\Program Files\Git\mingw64\bin\openssl.exe'
+$openssl = $opensslCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 $caKey = Join-Path $certDirectory 'pilot-ca.key'
 $caCert = Join-Path $certDirectory 'pilot-ca.crt'
 $serverKey = Join-Path $certDirectory 'lan-server.key'
@@ -16,8 +26,8 @@ $serverRequest = Join-Path $certDirectory 'lan-server.csr'
 $extensions = Join-Path $certDirectory 'lan-server.ext'
 $webPort = 5175
 
-if (-not (Test-Path -LiteralPath $openssl)) { throw 'OpenSSL from Git for Windows is required at C:\Program Files\Git\mingw64\bin\openssl.exe' }
-& (Join-Path $project 'start-local.ps1') -Lan
+if (-not $openssl) { throw 'OpenSSL was not found. Install Git for Windows and ensure git.exe or openssl.exe is on PATH.' }
+& (Join-Path $project 'start-local.ps1')
 New-Item -ItemType Directory -Path $certDirectory, $logDirectory -Force | Out-Null
 
 $lanIps = @([System.Net.Dns]::GetHostAddresses([System.Net.Dns]::GetHostName()) |
@@ -54,8 +64,6 @@ if ($regenerateServer) {
     & $openssl x509 -req -in $serverRequest -CA $caCert -CAkey $caKey -CAcreateserial -out $serverCert -days 365 -sha256 -extfile $extensions -extensions v3_server
     if ($LASTEXITCODE -ne 0) { throw 'Could not issue the LAN HTTPS certificate.' }
 }
-
-Copy-Item -LiteralPath $caCert -Destination (Join-Path $frontend 'public\warehouse-pilot-ca.crt') -Force
 
 function Test-WarehouseHttps {
     $code = @'
@@ -98,6 +106,7 @@ if (-not (Test-WarehouseHttps)) {
 }
 
 foreach ($ip in $lanIps) { Write-Output "Android live scan: https://${ip}:$webPort/?view=mobile" }
-Write-Output "Install this CA certificate on the Android phone first: http://$($lanIps[0]):5174/warehouse-pilot-ca.crt"
+Write-Output "请通过 USB 或其他可信方式把此 CA 证书传到手机并安装（不要传 .key 私钥）：$caCert"
+& $openssl x509 -in $caCert -noout -fingerprint -sha256
 Write-Output 'Never share private .key files from the certs directory.'
 if ($OpenBrowser) { Start-Process "https://127.0.0.1:$webPort/?view=mobile" }

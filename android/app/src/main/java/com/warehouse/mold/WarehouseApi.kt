@@ -58,15 +58,18 @@ class WarehouseApi(context: Context) {
 
     fun setServer(raw: String) {
         check(BuildConfig.CAN_EDIT_SERVER) { "正式版不能更换服务器地址" }
-        val value = raw.trim().trimEnd('/')
-        val uri = URI(value)
-        require(uri.scheme in listOf("http", "https") && !uri.host.isNullOrBlank() && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null && uri.path.isNullOrBlank()) { "请输入 http(s)://电脑IP:端口" }
-        require(uri.scheme == "https" || !uri.host.isNullOrBlank())
+        val value = validateServer(raw)
         if (value != baseUrl) {
             cookies.cookieStore.removeAll()
             cookieExpiry.clear()
             prefs.edit().remove("cookies").putString("server", value).apply()
             baseUrl = value
+        }
+    }
+
+    companion object {
+        fun validateServer(raw: String): String {
+            return ServerAddress.normalize(raw)
         }
     }
 
@@ -106,6 +109,7 @@ class WarehouseApi(context: Context) {
 
     private fun exchange(method: String, path: String, body: JSONObject?, csrf: Boolean): String {
         check(baseUrl.isNotBlank()) { "请先设置服务器地址" }
+        check(BuildConfig.CAN_EDIT_SERVER || URI(baseUrl).scheme == "https") { "正式版必须使用 HTTPS 服务器地址" }
         val uri = URI(baseUrl + path)
         val connection = URL(uri.toString()).openConnection() as HttpURLConnection
         connection.requestMethod = method

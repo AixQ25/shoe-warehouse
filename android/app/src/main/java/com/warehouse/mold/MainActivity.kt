@@ -129,9 +129,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connect() = job {
-        val proposed = state.serverInput.trim().trimEnd('/')
+        val proposed = WarehouseApi.validateServer(state.serverInput)
         // Check the new endpoint before replacing the saved address or its cookies.
-        require(proposed.startsWith("http://") || proposed.startsWith("https://")) { "请输入 http(s)://电脑IP:端口" }
         val url = java.net.URL("$proposed/api/health")
         val connection = url.openConnection() as java.net.HttpURLConnection
         connection.connectTimeout = 4_000
@@ -140,8 +139,8 @@ class MainActivity : ComponentActivity() {
             connection.responseCode == 200 && JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optString("status") == "ok"
         } finally { connection.disconnect() }
         check(ok) { "新地址没有连接到仓库服务" }
+        api.setServer(proposed)
         main.post {
-            api.setServer(proposed)
             state.serverInput = api.baseUrl
             state.user = null
             state.searchOpen = false
@@ -254,11 +253,13 @@ class MainActivity : ComponentActivity() {
         }
 
     private fun selectReturnShelf(id: Int, code: String): Boolean {
+        if (!draftServerMatches() || draftRestricted()) { state.error = "清单属于原仓库或原账号，请清空普通草稿后重新扫码"; return false }
         if (state.targetId != null && state.targetId != id) {
             state.error = "已选库位。要更换库位，请先清空本次清单"
             return false
         }
         if (state.targetId == id) return false
+        if (state.cart.isEmpty()) { state.draftOwnerId = state.user?.optInt("id"); state.draftServer = api.baseUrl }
         state.targetId = id
         state.message = "归还库位：$code。现在扫描模具"
         state.query = ""
@@ -267,13 +268,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun addMold(mold: Mold): Boolean {
+        if (!draftServerMatches()) { state.error = "清单属于 ${state.draftServer ?: "未知仓库"}，请连接原地址或清空后重新扫码"; return false }
         if (draftRestricted()) { state.error = "保存的清单属于其他账号，请用原账号处理"; return false }
         if (state.pending) { state.error = "请先确认上次提交结果"; return false }
         if (state.mode == "RETURN" && state.targetId == null) { state.error = "请先扫描实际归还库位"; return false }
         val required = if (state.mode == "ISSUE") "READY" else "IN_USE"
         if (mold.status != required) { state.error = "${mold.code} 当前状态不适合${if (state.mode == "ISSUE") "领用" else "归还"}"; return false }
         if (state.cart.any { it.id == mold.id }) { state.message = "${mold.code} 已在清单中"; return false }
-        if (state.cart.isEmpty()) state.draftOwnerId = state.user?.optInt("id")
+        if (state.cart.isEmpty()) { state.draftOwnerId = state.user?.optInt("id"); state.draftServer = api.baseUrl }
         state.cart.add(mold)
         state.message = "已加入清单：${mold.code}（尚未登记库存）"
         saveDraft()
@@ -342,17 +344,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun submit() {
+        if (!draftServerMatches()) { state.error = "清单属于其他仓库，请连接原地址后处理"; return }
         if (draftRestricted()) { state.error = "保存的清单属于其他账号"; return }
         if (state.pending) { state.error = "请先查询上次提交结果"; return }
         if (state.device?.optBoolean("authorized") != true) { state.error = "手机尚未授权"; return }
         val target = state.targetId ?: run { state.error = "请选择目标位置"; return }
         if (state.cart.isEmpty()) { state.error = "清单为空"; return }
         state.pending = true
-        saveDraft()
+        if (!saveDraft()) { state.pending = false; return }
         submitSaved(target)
     }
 
     private fun submitSaved(target: Int? = state.targetId) {
+        if (!draftServerMatches() || draftRestricted()) { state.error = "不能向其他仓库或使用其他账号重试原请求，请连接原地址并用原账号登录"; return }
         if (target == null) { state.error = "目标位置丢失，请人工核对保存的请求"; return }
         job {
             val id = state.requestId
@@ -367,7 +371,7 @@ class MainActivity : ComponentActivity() {
                         state.user = null
                         state.pending = true
                         state.error = "登录已过期，请重新登录后查询原请求结果"
-                    } else if (error.status in 400..499 && error.status != 408 && error.status != 429) {
+                    } else if (SubmissionRecovery.definitelyRejected(error.status, error.code)) {
                         state.pending = false
                         state.error = "服务器拒绝提交：${error.message}。请刷新并核对清单。"
                     } else {
@@ -387,6 +391,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun queryPending() = job {
+        check(draftServerMatches() && !draftRestricted()) { "请连接原仓库地址并使用原账号查询：${state.draftServer}" }
         try {
             val result = api.byRequest(state.requestId)
             main.post { finishSubmit(result) }
@@ -409,9 +414,12 @@ class MainActivity : ComponentActivity() {
         state.requestId = newRequestId(); saveDraft()
     }
 
-    private fun saveDraft() {
-        if (draftRestricted()) return
-        if (state.cart.isEmpty() && !state.pending) state.draftOwnerId = state.user?.optInt("id")
+    private fun saveDraft(): Boolean {
+        if (draftRestricted()) return false
+        if (state.cart.isEmpty() && state.targetId == null && !state.pending) {
+            state.draftServer = api.baseUrl
+            state.draftOwnerId = state.user?.optInt("id")
+        }
         if (state.draftOwnerId == null) state.draftOwnerId = state.user?.optInt("id")
         val items = JSONArray()
         state.cart.forEach { mold ->
@@ -424,7 +432,10 @@ class MainActivity : ComponentActivity() {
         val draft = JSONObject().put("mode", state.mode).put("target", state.targetId)
             .put("request_id", state.requestId).put("pending", state.pending).put("items", items)
             .put("owner_id", state.draftOwnerId)
-        getSharedPreferences("warehouse_draft", MODE_PRIVATE).edit().putString("current", draft.toString()).apply()
+            .put("server", state.draftServer)
+        return getSharedPreferences("warehouse_draft", MODE_PRIVATE).edit().putString("current", draft.toString()).commit().also {
+            if (!it) state.error = "清单保存失败，暂不能提交"
+        }
     }
 
     private fun restoreDraft() {
@@ -436,6 +447,7 @@ class MainActivity : ComponentActivity() {
             state.requestId = draft.getString("request_id")
             state.pending = draft.getBoolean("pending")
             state.draftOwnerId = if (draft.isNull("owner_id")) null else draft.getInt("owner_id")
+            state.draftServer = draft.optString("server").takeIf { it.isNotBlank() && it != "null" }
             state.cart.addAll(draft.getJSONArray("items").objects().map { Mold.from(it) })
             state.workOpen = state.cart.isNotEmpty() || state.pending || state.targetId != null
             state.confirmVisible = state.pending
@@ -444,7 +456,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun draftRestricted(): Boolean =
-        (state.cart.isNotEmpty() || state.pending) && state.draftOwnerId != null && state.user != null && state.draftOwnerId != state.user?.optInt("id")
+        (state.cart.isNotEmpty() || state.pending || state.targetId != null) && state.draftOwnerId != null && state.user != null && state.draftOwnerId != state.user?.optInt("id")
+
+    private fun draftServerMatches(): Boolean =
+        ServerAddress.allowsDraft(state.draftServer, api.baseUrl, state.cart.isNotEmpty() || state.pending || state.targetId != null)
 
     @Composable
     private fun Screen() {
@@ -794,8 +809,8 @@ class MainActivity : ComponentActivity() {
             if (lines.isEmpty()) Notice("没有可用产线，请返回首页刷新资料。", Color(0xFFFFE5DE), Color(0xFF932F22))
             lines.forEach { location ->
                 val selected = s.targetId == location.id
-                OutlinedButton(onClick = { s.targetId = location.id; s.requestId = newRequestId(); saveDraft() },
-                    enabled = !s.pending, modifier = Modifier.fillMaxWidth(),
+                OutlinedButton(onClick = { if (draftServerMatches() && !draftRestricted()) { s.targetId = location.id; s.requestId = newRequestId(); saveDraft() } },
+                    enabled = !s.pending && draftServerMatches() && !draftRestricted(), modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected) lime else Color.White, contentColor = ink)) {
                     Text("${if (selected) "✓  " else ""}${location.code} · ${location.name}", fontWeight = FontWeight.Bold)
                 }
@@ -808,9 +823,10 @@ class MainActivity : ComponentActivity() {
         CartContent()
         if (s.device?.optBoolean("authorized") != true) Notice("手机尚未授权，请返回首页打开设备设置。", Color(0xFFFFE5DE), Color(0xFF932F22))
         if (s.pending) {
+            if (!draftServerMatches()) Notice("原请求属于 ${s.draftServer}，不能向当前地址重试。请求编号 ${s.requestId}", Color(0xFFFFE5DE), Color(0xFF932F22))
             Notice("上次提交结果待确认 · 请求编号 ${s.requestId}", Color(0xFFFFE5DE), Color(0xFF932F22))
             Button(onClick = ::queryPending, enabled = !s.busy, modifier = Modifier.fillMaxWidth()) { Text("查询原提交结果") }
-            OutlinedButton(onClick = { submitSaved() }, enabled = !s.busy && s.cart.isNotEmpty() && s.targetId != null,
+            OutlinedButton(onClick = { submitSaved() }, enabled = !s.busy && draftServerMatches() && s.cart.isNotEmpty() && s.targetId != null,
                 modifier = Modifier.fillMaxWidth()) { Text("按原请求编号重试") }
         }
     }
@@ -830,6 +846,7 @@ class MainActivity : ComponentActivity() {
         var targetId by mutableStateOf<Int?>(null)
         var requestId by mutableStateOf(newRequestId())
         var pending by mutableStateOf(false)
+        var draftServer by mutableStateOf<String?>(null)
         var draftOwnerId by mutableStateOf<Int?>(null)
         var cameraVisible by mutableStateOf(false)
         var workOpen by mutableStateOf(false)
