@@ -4,13 +4,14 @@ import csv
 import hashlib
 import io
 import json
+import re
 from collections import Counter, defaultdict
 from datetime import timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -18,11 +19,13 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import AuthContext, api_error, current_context, get_db, require_admin, require_csrf
 from .capacity import SHELF_CAPACITY, shelf_counts
 from .models import AuditLog, ImportBatch, Location, Mold, MoldModel, MoldSet, Operation, OperationItem, StocktakeSession, User, utc_now
+from .mold_metadata import METADATA_FIELDS, STANDARD_SIZES, SHOE_TYPES, MoldMetadata, metadata_dict, mold_identity, normalize_category, normalize_size, set_identity, numeric_size, size_plan
 
 
 router = APIRouter(prefix="/api", tags=["imports-exports"])
-FIELDS = ("model_code", "model_name", "set_code", "default_location_code", "mold_code", "size_label", "status", "current_location_code", "original_code")
-REQUIRED = FIELDS[:-1]
+REQUIRED = ("model_code", "model_name", "set_code", "default_location_code", "mold_code", "size_label", "status", "current_location_code")
+FIELDS = REQUIRED + ("original_code",) + METADATA_FIELDS + ("mold_number", "shoe_type", "set_sizes")
+TEMPLATE_FIELDS = ("mold_number", "shoe_type", "mold_category", "set_sizes", "size_label", "default_location_code", "status", "current_location_code", "manufacturer", "pairs_per_mold", "sole_material", "initial_quarter", "opened_on")
 LIMIT_BYTES = 3_000_000
 LIMIT_ROWS = 5_000
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -35,6 +38,14 @@ class CommitInput(BaseModel):
 
 def error(row: int, field: str, message: str) -> dict:
     return {"row": row, "field": field, "message": message}
+
+
+def row_metadata(row: dict) -> MoldMetadata:
+    values = {field: row.get(field) or None for field in METADATA_FIELDS}
+    pairs = values["pairs_per_mold"]
+    if isinstance(pairs, str) and pairs.isascii() and pairs.isdecimal():
+        values["pairs_per_mold"] = int(pairs)
+    return MoldMetadata(**values)
 
 
 def parse_csv(raw: bytes) -> tuple[list[dict], list[dict]]:
@@ -50,7 +61,10 @@ def parse_csv(raw: bytes) -> tuple[list[dict], list[dict]]:
     if reader.fieldnames is None:
         return [], [error(1, "header", "缺少表头")]
     headers = [name.strip() for name in reader.fieldnames]
-    missing = [name for name in REQUIRED if name not in headers]
+    common_headers = ("default_location_code", "size_label", "status", "current_location_code")
+    missing = [name for name in common_headers if name not in headers]
+    if not {"mold_number", "model_code"}.intersection(headers):
+        missing.append("mold_number")
     extra = [name for name in headers if name not in FIELDS]
     if missing or extra or len(headers) != len(set(headers)):
         return [], [error(1, "header", f"表头不符；缺少：{','.join(missing) or '无'}；未知或重复：{','.join(extra) or '无'}")]
@@ -68,18 +82,53 @@ def parse_csv(raw: bytes) -> tuple[list[dict], list[dict]]:
             values = {name: (item.get(name) or "").strip() for name in FIELDS}
             if not any(values.values()):
                 continue
-            for name in ("model_code", "set_code", "default_location_code", "mold_code", "current_location_code"):
+            for name in ("model_code", "mold_number", "set_code", "default_location_code", "mold_code", "current_location_code"):
                 values[name] = values[name].upper()
             values["status"] = values["status"].upper()
             values["row"] = number
+            if values["shoe_type"] and values["shoe_type"] not in SHOE_TYPES:
+                problems.append(error(number, "shoe_type", "鞋类须为男鞋、女鞋、男童或女童"))
+            standard = bool(values["mold_number"] or values["mold_category"] or not (values["set_code"] and values["mold_code"]))
+            if standard:
+                style_number = values["mold_number"] or values["model_code"]
+                if values["mold_number"] and values["model_code"] and values["mold_number"] != values["model_code"]:
+                    problems.append(error(number, "mold_number", "款号与兼容列 model_code 不一致"))
+                values["model_code"] = style_number
+                values["model_name"] = values["model_name"] or style_number
+                try:
+                    category = normalize_category(values["mold_category"] or "A模")
+                    expected_set = set_identity(style_number, category)
+                    values["shoe_type"] = values["shoe_type"] or "男鞋"
+                    values["planned_sizes"] = list(size_plan(values["shoe_type"], re.split(r"[、,，;；/\s]+", values["set_sizes"]) if values["set_sizes"] else None))
+                    size = numeric_size(values["size_label"])
+                    if size not in values["planned_sizes"]:
+                        raise ValueError("码数不在该套方案内，请核对鞋类或 set_sizes")
+                    expected_mold = mold_identity(style_number, category, size)
+                    if values["set_code"] and values["set_code"] != expected_set:
+                        problems.append(error(reader.line_num, "set_code", "套身份由款号和 A/B 类别自动生成，请留空或填写 " + expected_set))
+                    if values["mold_code"] and values["mold_code"] != expected_mold:
+                        problems.append(error(reader.line_num, "mold_code", "单件身份由款号、A/B 和码数自动生成，请留空或填写 " + expected_mold))
+                    values.update(set_code=expected_set, mold_code=expected_mold, size_label=size, mold_category=category, set_category=category)
+                except ValueError as exc:
+                    problems.append(error(reader.line_num, "identity", str(exc)))
             for name in REQUIRED:
                 if not values[name]:
-                    problems.append(error(number, name, "必填项不能为空"))
+                    problems.append(error(reader.line_num, name, "必填项不能为空"))
+            number = reader.line_num
             for name, maximum in (("model_code", 80), ("model_name", 120), ("set_code", 80), ("default_location_code", 80), ("mold_code", 80), ("size_label", 30), ("status", 30), ("current_location_code", 80), ("original_code", 100)):
                 if len(values[name]) > maximum:
                     problems.append(error(number, name, f"长度不能超过 {maximum} 个字符"))
             if values["status"] not in {"READY", "PENDING_INSPECTION"}:
                 problems.append(error(number, "status", "初始状态只能为 READY 或 PENDING_INSPECTION"))
+            try:
+                values["size_label"] = normalize_size(values["size_label"])
+            except ValueError as exc:
+                problems.append(error(number, "size_label", str(exc)))
+            try:
+                values.update(row_metadata(values).model_dump(mode="json"))
+            except ValidationError as exc:
+                for detail in exc.errors():
+                    problems.append(error(number, str(detail["loc"][0]), detail["msg"]))
             rows.append(values)
     except csv.Error:
         return [], [error(reader.line_num, "file", "CSV 格式错误，请检查引号和换行")]
@@ -95,11 +144,13 @@ def validate_rows(rows: list[dict], db: Session) -> list[dict]:
     occupied = shelf_counts(db, shelf_ids)
     models = {item.code.upper(): item for item in db.scalars(select(MoldModel)).all()}
     existing_sets = {code.upper() for code in db.scalars(select(MoldSet.code)).all()}
+    existing_categories = {(item.model.code.upper(), item.mold_category) for item in db.scalars(select(MoldSet)).all() if item.mold_category}
     existing_molds = {code.upper() for code in db.scalars(select(Mold.code)).all()}
     frozen_locations = set(db.scalars(select(StocktakeSession.location_id).where(StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"]))).all())
     set_groups: dict[str, list[dict]] = defaultdict(list)
     model_names: dict[str, str] = {}
-    set_details: dict[str, tuple[str, str]] = {}
+    model_types: dict[str, str] = {}
+    set_details: dict[str, tuple] = {}
     seen_mold_codes: set[str] = set()
     seen_set_sizes: set[tuple[str, str]] = set()
     for row in rows:
@@ -107,17 +158,26 @@ def validate_rows(rows: list[dict], db: Session) -> list[dict]:
         model_code, set_code, mold_code = row["model_code"], row["set_code"], row["mold_code"]
         set_groups[set_code].append(row)
         if model_code in model_names and model_names[model_code] != row["model_name"]:
-            problems.append(error(number, "model_name", "同一型号在文件中的名称不一致"))
+            problems.append(error(number, "model_name", "同一款式在文件中的名称不一致"))
         model_names[model_code] = row["model_name"]
         existing_model = models.get(model_code)
-        if existing_model and existing_model.name != row["model_name"]:
-            problems.append(error(number, "model_name", "该型号已存在，但名称与现有档案不同"))
-        detail = (model_code, row["default_location_code"])
+        if existing_model and not row.get("set_category") and existing_model.name != row["model_name"]:
+            problems.append(error(number, "model_name", "该款式已存在，但名称与现有档案不同"))
+        shoe_type = row.get("shoe_type")
+        if shoe_type:
+            if model_code in model_types and model_types[model_code] != shoe_type:
+                problems.append(error(number, "shoe_type", "同一款号的鞋类不一致"))
+            if existing_model and existing_model.shoe_type and existing_model.shoe_type != shoe_type:
+                problems.append(error(number, "shoe_type", "鞋类与已有款式不一致"))
+            model_types[model_code] = shoe_type
+        detail = (model_code, row["default_location_code"], row.get("set_category"), shoe_type, tuple(row.get("planned_sizes") or []))
         if set_code in set_details and set_details[set_code] != detail:
-            problems.append(error(number, "set_code", "同一套的型号或默认库位不一致"))
+            problems.append(error(number, "set_code", "同一套的款号或默认库位不一致"))
         set_details[set_code] = detail
+        if row.get("set_category") and (model_code, row["set_category"]) in existing_categories:
+            problems.append(error(number, "mold_category", "该款的此 A/B 套别已存在，导入不会覆盖已有套"))
         if set_code in existing_sets:
-            problems.append(error(number, "set_code", "套号已存在；导入不会覆盖或补齐历史套"))
+            problems.append(error(number, "set_code", "该款类别或历史档案已存在；导入不会覆盖或补齐历史套"))
         if mold_code in seen_mold_codes or mold_code in existing_molds:
             problems.append(error(number, "mold_code", "模具编号重复或已存在"))
         seen_mold_codes.add(mold_code)
@@ -142,9 +202,13 @@ def validate_rows(rows: list[dict], db: Session) -> list[dict]:
             if occupied[current.id] > SHELF_CAPACITY:
                 problems.append(error(number, "current_location_code", f"库位 {current.code} 最多存放 {SHELF_CAPACITY} 个模具，含本行将达到 {occupied[current.id]} 个"))
     for group in set_groups.values():
-        if len(group) != 10:
+        plan = group[0].get("planned_sizes") or list(STANDARD_SIZES)
+        count = len(plan) if group[0].get("set_category") else 10
+        if len(group) != count:
             for row in group:
-                problems.append(error(row["row"], "set_code", f"一套必须恰好有 10 个尺码，当前 {len(group)} 个"))
+                problems.append(error(row["row"], "size_label", f"该套方案需要 {count} 个码数，当前 {len(group)} 个"))
+        if group[0].get("set_category") and {row["size_label"] for row in group} != set(plan):
+            problems.append(error(group[0]["row"], "size_label", "每套必须完整包含：" + "、".join(plan)))
     return problems
 
 
@@ -172,7 +236,7 @@ def local_time(value) -> str:  # type: ignore[no-untyped-def]
 @router.get("/imports/template")
 def import_template(context: AuthContext = Depends(current_context)) -> Response:
     require_admin(context)
-    return csv_response("mold-import-template.csv", list(FIELDS), [])
+    return csv_response("mold-import-template.csv", list(TEMPLATE_FIELDS), [])
 
 
 @router.post("/imports/preview")
@@ -219,20 +283,24 @@ def commit_import(payload: CommitInput, context: AuthContext = Depends(require_c
     try:
         for row in rows:
             if row["model_code"] not in existing_models:
-                model = MoldModel(code=row["model_code"], name=row["model_name"])
+                model = MoldModel(code=row["model_code"], name=row["model_name"], shoe_type=row.get("shoe_type") or None)
                 db.add(model)
                 existing_models[row["model_code"]] = model
+        for row in rows:
+            model = existing_models[row["model_code"]]
+            if model.shoe_type is None and row.get("shoe_type"):
+                model.shoe_type = row["shoe_type"]
         db.flush()
         operation_ids: list[int] = []
         for set_code, group in by_set.items():
             first = group[0]
-            mold_set = MoldSet(code=set_code, model_id=existing_models[first["model_code"]].id, default_location_id=locations[first["default_location_code"]].id)
+            mold_set = MoldSet(code=set_code, model_id=existing_models[first["model_code"]].id, mold_category=first.get("set_category"), size_labels=json.dumps(first.get("planned_sizes") or STANDARD_SIZES) if first.get("set_category") else None, default_location_id=locations[first["default_location_code"]].id)
             db.add(mold_set)
             db.flush()
             operation = Operation(request_id=str(uuid4()), payload_hash=batch.sha256, type="INITIALIZE", actor_user_id=context.user.id, target_location_id=mold_set.default_location_id, reason=f"CSV 初始建档批次 {batch.token}")
             db.add(operation)
             for row in group:
-                mold = Mold(code=row["mold_code"], original_code=row["original_code"] or None, set_id=mold_set.id, size_label=row["size_label"], status=row["status"], current_location_id=locations[row["current_location_code"]].id, is_current=True, version=1)
+                mold = Mold(code=row["mold_code"], original_code=row["original_code"] or None, set_id=mold_set.id, size_label=row["size_label"], status=row["status"], current_location_id=locations[row["current_location_code"]].id, is_current=True, version=1, **row_metadata(row).model_dump())
                 db.add(mold)
                 db.flush()
                 db.add(OperationItem(operation=operation, mold_id=mold.id, before_status="NOT_REGISTERED", after_status=mold.status, before_location_id=None, after_location_id=mold.current_location_id, before_custodian_id=None, after_custodian_id=None, before_version=0, after_version=1))
@@ -259,8 +327,8 @@ def require_exporter(context: AuthContext) -> None:
 def export_inventory(context: AuthContext = Depends(current_context), db: Session = Depends(get_db)) -> Response:
     require_exporter(context)
     molds = db.scalars(select(Mold).where(Mold.is_current.is_(True)).order_by(Mold.code)).all()
-    rows = [[item.code, item.original_code, item.set.model.code, item.set.model.name, item.set.code, item.size_label, item.status, item.current_location.code, item.set.default_location.code, item.custodian.name if item.custodian else "", item.version] for item in molds]
-    return csv_response("warehouse-inventory.csv", ["模具编号", "原编号", "型号编号", "模具名称", "套号", "尺码", "状态", "当前位置", "默认库位", "当前责任人", "版本"], rows)
+    rows = [[item.code, item.original_code, item.set.model.code, item.set.model.name, item.set.model.shoe_type, item.set.code, item.size_label, item.status, item.current_location.code, item.set.default_location.code, item.custodian.name if item.custodian else "", item.version, *metadata_dict(item).values()] for item in molds]
+    return csv_response("warehouse-inventory.csv", ["单件身份编号", "原编号", "模具编号（款号）", "模具名称", "鞋类", "套身份编号", "码数", "状态", "当前位置", "默认库位", "当前责任人", "版本", "模具厂家", "模具类别", "排模双数", "鞋底材质", "初始季度", "开制日期"], rows)
 
 
 @router.get("/exports/operations")

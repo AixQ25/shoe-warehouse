@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -72,6 +72,7 @@ class MoldModel(Base):
     code: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
+    shoe_type: Mapped[str | None] = mapped_column(String(10))
 
 
 class MoldSet(Base):
@@ -79,10 +80,15 @@ class MoldSet(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     model_id: Mapped[int] = mapped_column(ForeignKey("mold_models.id"), nullable=False)
+    mold_category: Mapped[str | None] = mapped_column(String(10))
+    size_labels: Mapped[str | None] = mapped_column(Text)
     default_location_id: Mapped[int] = mapped_column(ForeignKey("locations.id"), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     model: Mapped[MoldModel] = relationship()
     default_location: Mapped[Location] = relationship()
+
+
+Index("uq_model_set_category", MoldSet.model_id, MoldSet.mold_category, unique=True)
 
 
 class Mold(Base):
@@ -92,6 +98,12 @@ class Mold(Base):
     original_code: Mapped[str | None] = mapped_column(String(100))
     set_id: Mapped[int] = mapped_column(ForeignKey("mold_sets.id"), nullable=False, index=True)
     size_label: Mapped[str] = mapped_column(String(30), nullable=False)
+    manufacturer: Mapped[str | None] = mapped_column(String(100))
+    mold_category: Mapped[str | None] = mapped_column(String(30))
+    pairs_per_mold: Mapped[int | None] = mapped_column(Integer)
+    sole_material: Mapped[str | None] = mapped_column(String(30))
+    initial_quarter: Mapped[str | None] = mapped_column(String(5))
+    opened_on: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     current_location_id: Mapped[int] = mapped_column(ForeignKey("locations.id"), nullable=False)
     custodian_person_id: Mapped[int | None] = mapped_column(ForeignKey("people.id"))

@@ -7,13 +7,14 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import AuthContext, api_error, current_context, get_db, require_admin, require_csrf
 from .capacity import ensure_shelf_capacity
+from .mold_metadata import METADATA_FIELDS, MoldMetadata, metadata_dict, mold_identity, normalize_category, normalize_size, set_identity, numeric_size, size_plan, expected_sizes, expected_size_count, set_complete
 from .models import AuditLog, AuthorizedDevice, LabelPrintBatch, Location, LoginSession, Mold, MoldModel, MoldSet, Operation, OperationItem, Person, StocktakeAdjustment, StocktakeExpected, StocktakeScan, StocktakeSession, User, utc_now
 
 router = APIRouter(prefix="/api", tags=["catalog"])
@@ -62,19 +63,80 @@ class ModelInput(BaseModel):
     notes: str | None = None
 
 
-class SetInput(BaseModel):
-    code: str = Field(min_length=1, max_length=80)
+class SetInput(MoldMetadata):
+    code: str | None = Field(default=None, min_length=1, max_length=80)
     model_id: int = Field(gt=0)
     default_location_id: int = Field(gt=0)
+    create_molds: bool | None = None
+    size_labels: list[str] | None = Field(default=None, min_length=1, max_length=100)
+
+    @field_validator("mold_category", mode="before")
+    @classmethod
+    def clean_category(cls, value):
+        return normalize_category(value) if value else None
 
 
-class MoldInput(BaseModel):
-    code: str = Field(min_length=1, max_length=80)
+class StandardSetInput(MoldMetadata):
+    mold_number: str = Field(min_length=1, max_length=80)
+    mold_category: str = "A模"
+    default_location_id: int = Field(gt=0)
+    shoe_type: Literal["男鞋", "女鞋", "女童", "男童"] = "男鞋"
+    mode: Literal["SET", "SINGLE"] = "SET"
+    size_label: str | None = Field(default=None, max_length=30)
+    size_labels: list[str] | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def resolve_sizes(self):
+        if self.size_labels is not None:
+            self.size_labels = list(size_plan(self.shoe_type, self.size_labels))
+        if self.mode == "SINGLE":
+            if self.size_label is None:
+                raise ValueError("单个生成需要填写码数")
+            self.size_label = numeric_size(self.size_label)
+            if self.size_labels is not None and self.size_label not in self.size_labels:
+                raise ValueError("单个码数须属于该套码数清单，可先调整清单")
+        for size in self.size_labels or size_plan(self.shoe_type, None):
+            mold_identity(self.mold_number, self.mold_category, size)
+        return self
+
+    @field_validator("mold_category", mode="before")
+    @classmethod
+    def clean_category(cls, value):
+        return normalize_category(value)
+
+    @field_validator("mold_number")
+    @classmethod
+    def clean_number(cls, value):
+        number = value.strip().upper()
+        set_identity(number, "A模")
+        return number
+
+
+class MoldInput(MoldMetadata):
+    code: str | None = Field(default=None, min_length=1, max_length=80)
     set_id: int = Field(gt=0)
     size_label: str = Field(min_length=1, max_length=30)
     original_code: str | None = Field(default=None, max_length=100)
     status: Literal["READY", "PENDING_INSPECTION"] = "READY"
     current_location_id: int = Field(gt=0)
+
+    @field_validator("size_label")
+    @classmethod
+    def clean_size(cls, value: str) -> str:
+        return normalize_size(value)
+
+
+class MoldMetadataInput(MoldMetadata):
+    expected_version: int = Field(gt=0)
+    reason: str = Field(min_length=3, max_length=300)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("修改原因至少 3 个字")
+        return value
 
 
 class ScanInput(BaseModel):
@@ -98,9 +160,14 @@ def mold_dict(mold: Mold) -> dict:
         "original_code": mold.original_code,
         "set_id": mold.set_id,
         "set_code": mold.set.code,
+        "set_category": mold.set.mold_category,
         "model_code": mold.set.model.code,
+        "mold_number": mold.set.model.code,
+        "shoe_type": mold.set.model.shoe_type,
+        "expected_size_count": expected_size_count(mold.set),
         "name": mold.set.model.name,
         "size_label": mold.size_label,
+        **metadata_dict(mold),
         "status": mold.status,
         "current_location_id": mold.current_location_id,
         "current_location": mold.current_location.code,
@@ -236,7 +303,7 @@ def delete_location(location_id: int, context: AuthContext = Depends(require_csr
 
 @router.get("/models")
 def list_models(_context: AuthContext = Depends(current_context), db: Session = Depends(get_db)) -> list[dict]:
-    return [{"id": item.id, "code": item.code, "name": item.name, "notes": item.notes} for item in db.scalars(select(MoldModel).order_by(MoldModel.code)).all()]
+    return [{"id": item.id, "code": item.code, "name": item.name, "notes": item.notes, "shoe_type": item.shoe_type} for item in db.scalars(select(MoldModel).order_by(MoldModel.code)).all()]
 
 
 @router.post("/models")
@@ -244,9 +311,9 @@ def create_model(payload: ModelInput, context: AuthContext = Depends(require_csr
     require_admin(context)
     model = MoldModel(**payload.model_dump())
     db.add(model)
-    flush_or_conflict(db, "MODEL_CONFLICT", "型号编号已存在")
+    flush_or_conflict(db, "MODEL_CONFLICT", "款号已存在")
     db.add(AuditLog(actor_user_id=context.user.id, action="MODEL_CREATE", entity=model.code, after=model.name))
-    save_or_conflict(db, "MODEL_CONFLICT", "型号编号已存在")
+    save_or_conflict(db, "MODEL_CONFLICT", "款号已存在")
     return {"id": model.id, "code": model.code}
 
 
@@ -255,12 +322,12 @@ def delete_model(model_id: int, context: AuthContext = Depends(require_csrf), db
     require_admin(context)
     model = db.scalar(select(MoldModel).where(MoldModel.id == model_id).with_for_update())
     if model is None:
-        raise api_error(404, "MODEL_NOT_FOUND", "型号不存在")
+        raise api_error(404, "MODEL_NOT_FOUND", "款式不存在")
     if db.scalar(select(MoldSet.id).where(MoldSet.model_id == model_id).limit(1)) is not None:
-        raise api_error(409, "MODEL_IN_USE", "型号已关联模具套，请先处理模具套")
+        raise api_error(409, "MODEL_IN_USE", "款式已关联模具套，请先处理模具套")
     db.delete(model)
     db.add(AuditLog(actor_user_id=context.user.id, action="MODEL_DELETE", entity=model.code, before=model.name))
-    save_or_conflict(db, "MODEL_IN_USE", "型号已被业务资料引用，不能删除")
+    save_or_conflict(db, "MODEL_IN_USE", "款式已被业务资料引用，不能删除")
     return {"id": model_id, "code": model.code}
 
 
@@ -271,22 +338,111 @@ def list_sets(_context: AuthContext = Depends(current_context), db: Session = De
     by_set: dict[int, list[Mold]] = defaultdict(list)
     for mold in molds:
         by_set[mold.set_id].append(mold)
-    return [{"id": item.id, "code": item.code, "model_code": item.model.code, "name": item.model.name, "default_location": item.default_location.code, "size_count": len(by_set[item.id]), "complete": len(by_set[item.id]) == 10, "active": item.active} for item in sets]
+    return [{"id": item.id, "code": item.code, "model_code": item.model.code, "mold_category": item.mold_category, "shoe_type": item.model.shoe_type, "size_labels": list(expected_sizes(item) or []), "expected_size_count": expected_size_count(item), "name": item.model.name, "default_location": item.default_location.code, "size_count": len(by_set[item.id]), "complete": set_complete(item, by_set[item.id]), "active": item.active} for item in sets]
 
 
 @router.post("/sets")
 def create_set(payload: SetInput, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
     require_admin(context)
     model = db.get(MoldModel, payload.model_id)
-    location = db.get(Location, payload.default_location_id)
+    location = db.scalar(select(Location).where(Location.id == payload.default_location_id).with_for_update().execution_options(populate_existing=True))
     if model is None or location is None or not location.active or location.type != "SHELF":
-        raise api_error(422, "SET_REFERENCE_INVALID", "型号或默认库位无效")
-    mold_set = MoldSet(**payload.model_dump())
+        raise api_error(422, "SET_REFERENCE_INVALID", "款式或默认库位无效")
+    category = payload.mold_category or ("A模" if payload.code is None else None)
+    create_members = payload.create_molds if payload.create_molds is not None else category is not None
+    if create_members and category is None:
+        raise api_error(422, "SET_CATEGORY_REQUIRED", "整套建档需要选择 A模 或 B模")
+    try:
+        code = set_identity(model.code, category) if category else payload.code
+    except ValueError as exc:
+        raise api_error(422, "SET_IDENTITY_INVALID", str(exc)) from None
+    if category and payload.code is not None and payload.code.strip().upper() != code:
+        raise api_error(422, "SET_IDENTITY_INVALID", "整套身份由款号和 A/B 类别自动生成")
+    if category and db.scalar(select(MoldSet.id).where(MoldSet.model_id == model.id, MoldSet.mold_category == category)) is not None:
+        raise api_error(409, "SET_CONFLICT", f"该款的 {category} 已存在")
+    if category and db.scalar(select(StocktakeSession.id).where(StocktakeSession.location_id == location.id, StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"])).limit(1)) is not None:
+        raise api_error(409, "LOCATION_STOCKTAKE_FROZEN", "该库位正在盘点，暂不能建立整套模具")
+    if category and model.shoe_type is None:
+        model.shoe_type = "男鞋"
+    try:
+        sizes = size_plan(model.shoe_type or "男鞋", payload.size_labels) if category else None
+        for size in sizes or []:
+            mold_identity(model.code, category, size)
+    except ValueError as exc:
+        raise api_error(422, "MOLD_SIZE_INVALID", str(exc)) from None
+    if create_members:
+        ensure_shelf_capacity(db, {location.id: location}, [(None, location.id)] * len(sizes))
+    mold_set = MoldSet(code=code, model_id=model.id, mold_category=category, size_labels=json.dumps(sizes) if sizes else None, default_location_id=location.id)
     db.add(mold_set)
-    flush_or_conflict(db, "SET_CONFLICT", "套号已存在")
+    flush_or_conflict(db, "SET_CONFLICT", "该款类别已存在")
+    if create_members:
+        operation = Operation(request_id=str(uuid4()), payload_hash=hashlib.sha256(json.dumps(payload.model_dump(mode="json"), ensure_ascii=False, sort_keys=True).encode()).hexdigest(), type="INITIALIZE", actor_user_id=context.user.id, target_location_id=location.id, reason="维护员按款号和套别整套建档")
+        db.add(operation)
+        for size in sizes:
+            metadata = payload.model_dump(include=set(METADATA_FIELDS))
+            metadata["mold_category"] = category
+            mold = Mold(code=mold_identity(model.code, category, size), set_id=mold_set.id, size_label=size, status="READY", current_location_id=location.id, is_current=True, version=1, **metadata)
+            db.add(mold)
+            flush_or_conflict(db, "MOLD_CONFLICT", "款号、套别或码数与已有模具冲突，整套未写入")
+            db.add(OperationItem(operation=operation, mold_id=mold.id, before_status="NOT_REGISTERED", after_status="READY", before_location_id=None, after_location_id=location.id, before_version=0, after_version=1))
     db.add(AuditLog(actor_user_id=context.user.id, action="SET_CREATE", entity=mold_set.code, after=location.code))
-    save_or_conflict(db, "SET_CONFLICT", "套号已存在")
-    return {"id": mold_set.id, "code": mold_set.code, "complete": False}
+    save_or_conflict(db, "SET_CONFLICT", "该款类别已存在")
+    return {"id": mold_set.id, "code": mold_set.code, "mold_category": category, "complete": create_members, "size_count": len(sizes) if create_members else 0, "sizes": list(sizes) if create_members else [], "expected_size_count": expected_size_count(mold_set)}
+
+
+@router.post("/mold-sets")
+def create_standard_set(payload: StandardSetInput, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    location = db.scalar(select(Location).where(Location.id == payload.default_location_id).with_for_update().execution_options(populate_existing=True))
+    if location is None or not location.active or location.type != "SHELF":
+        raise api_error(422, "SET_REFERENCE_INVALID", "请选择有效普通库位")
+    if db.scalar(select(StocktakeSession.id).where(StocktakeSession.location_id == location.id, StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"])).limit(1)) is not None:
+        raise api_error(409, "LOCATION_STOCKTAKE_FROZEN", "该库位正在盘点，暂不能建档")
+    model = db.scalar(select(MoldModel).where(func.upper(MoldModel.code) == payload.mold_number).with_for_update().execution_options(populate_existing=True))
+    if model is None:
+        model = MoldModel(code=payload.mold_number, name=payload.mold_number, shoe_type=payload.shoe_type)
+        db.add(model)
+        flush_or_conflict(db, "MODEL_CONFLICT", "款号已存在，请刷新后重试")
+        db.add(AuditLog(actor_user_id=context.user.id, action="MODEL_CREATE", entity=model.code, after=payload.shoe_type))
+    elif model.shoe_type is not None and model.shoe_type != payload.shoe_type:
+        raise api_error(409, "SHOE_TYPE_CONFLICT", "同一款号的鞋类须保持一致，请选择已有分类")
+    elif model.shoe_type is None:
+        model.shoe_type = payload.shoe_type
+        db.add(AuditLog(actor_user_id=context.user.id, action="MODEL_SHOE_TYPE", entity=model.code, after=payload.shoe_type, reason="按本次建档明确款式分类"))
+    mold_set = db.scalar(select(MoldSet).where(MoldSet.model_id == model.id, MoldSet.mold_category == payload.mold_category).with_for_update().execution_options(populate_existing=True))
+    plan = size_plan(payload.shoe_type, payload.size_labels)
+    if mold_set is None:
+        mold_set = MoldSet(code=set_identity(model.code, payload.mold_category), model_id=model.id, mold_category=payload.mold_category, size_labels=json.dumps(plan), default_location_id=location.id)
+        db.add(mold_set)
+        flush_or_conflict(db, "SET_CONFLICT", "款号和类别已存在")
+        db.add(AuditLog(actor_user_id=context.user.id, action="SET_CREATE", entity=mold_set.code, after=location.code))
+    elif not mold_set.active:
+        raise api_error(409, "SET_INACTIVE", "该套已停用")
+    else:
+        existing_plan = expected_sizes(mold_set)
+        if payload.size_labels is not None and set(plan) != set(existing_plan or []):
+            raise api_error(409, "SIZE_PLAN_CONFLICT", "该套已有码数方案，请使用原方案；建档不会改变已有方案")
+        plan = existing_plan or plan
+    members = db.scalars(select(Mold).where(Mold.set_id == mold_set.id, Mold.is_current.is_(True)).with_for_update().execution_options(populate_existing=True)).all()
+    existing = {mold.size_label for mold in members}
+    requested = [payload.size_label] if payload.mode == "SINGLE" else list(plan)
+    if any(size not in plan for size in requested):
+        raise api_error(422, "MOLD_SIZE_INVALID", "码数不在该套方案内")
+    missing = [size for size in requested if size not in existing]
+    if not missing:
+        raise api_error(409, "SET_CONFLICT" if payload.mode == "SET" else "MOLD_CONFLICT", "所选码数已建档，不会重复生成")
+    ensure_shelf_capacity(db, {location.id: location}, [(None, location.id)] * len(missing))
+    operation = Operation(request_id=str(uuid4()), payload_hash=hashlib.sha256(json.dumps(payload.model_dump(mode="json"), ensure_ascii=False, sort_keys=True).encode()).hexdigest(), type="INITIALIZE", actor_user_id=context.user.id, target_location_id=location.id, reason="维护员按款号单个建档" if payload.mode == "SINGLE" else "维护员按款号和套别整套建档")
+    db.add(operation)
+    for size in missing:
+        metadata = payload.model_dump(include=set(METADATA_FIELDS))
+        mold = Mold(code=mold_identity(model.code, payload.mold_category, size), set_id=mold_set.id, size_label=size, status="READY", current_location_id=location.id, is_current=True, version=1, **metadata)
+        db.add(mold)
+        flush_or_conflict(db, "MOLD_CONFLICT", "单件身份已存在，本次未写入")
+        db.add(OperationItem(operation=operation, mold_id=mold.id, before_status="NOT_REGISTERED", after_status="READY", before_location_id=None, after_location_id=location.id, before_version=0, after_version=1))
+        members.append(mold)
+    save_or_conflict(db, "SET_CONFLICT", "款号、类别或码数发生冲突，本次未写入")
+    return {"id": mold_set.id, "code": mold_set.code, "mold_category": mold_set.mold_category, "shoe_type": model.shoe_type, "sizes": list(plan), "expected_size_count": len(plan), "created_count": len(missing), "size_count": len(members), "complete": set_complete(mold_set, members)}
 
 
 @router.delete("/sets/{set_id}")
@@ -330,7 +486,7 @@ def list_molds(q: str = "", status: str | None = None, offset: int = 0, limit: i
         query = query.where(Mold.status == status)
     if q:
         pattern = f"%{q.strip()}%"
-        query = query.join(Mold.set).join(MoldSet.model).where(or_(Mold.code.ilike(pattern), MoldSet.code.ilike(pattern), MoldModel.code.ilike(pattern), MoldModel.name.ilike(pattern), Mold.size_label.ilike(pattern)))
+        query = query.join(Mold.set).join(MoldSet.model).where(or_(Mold.code.ilike(pattern), MoldSet.code.ilike(pattern), MoldModel.code.ilike(pattern), MoldModel.name.ilike(pattern), MoldSet.mold_category.ilike(pattern), MoldModel.shoe_type.ilike(pattern), Mold.size_label.ilike(pattern)))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     page = db.scalars(query.options(selectinload(Mold.set).selectinload(MoldSet.model), selectinload(Mold.set).selectinload(MoldSet.default_location), selectinload(Mold.current_location), selectinload(Mold.custodian)).order_by(Mold.id).offset(offset).limit(limit)).all()
     return {"total": total, "items": [mold_dict(item) for item in page]}
@@ -351,24 +507,67 @@ def create_mold(payload: MoldInput, context: AuthContext = Depends(require_csrf)
     mold_set = db.scalar(select(MoldSet).where(MoldSet.id == payload.set_id).with_for_update())
     if mold_set is None or not mold_set.active or location is None or not location.active:
         raise api_error(422, "MOLD_REFERENCE_INVALID", "模具套或位置无效")
+    if mold_set.mold_category:
+        try:
+            payload.size_label = numeric_size(payload.size_label)
+            if expected_sizes(mold_set) is not None and payload.size_label not in expected_sizes(mold_set):
+                raise ValueError("码数不在该套方案内")
+            identity = mold_identity(mold_set.model.code, mold_set.mold_category, payload.size_label)
+        except ValueError as exc:
+            raise api_error(422, "MOLD_SIZE_INVALID", str(exc)) from None
+        if payload.code is not None and payload.code != identity:
+            raise api_error(422, "MOLD_IDENTITY_INVALID", "单件身份由款号、套别和码数自动生成")
+        if payload.mold_category is not None and payload.mold_category != mold_set.mold_category:
+            raise api_error(422, "MOLD_CATEGORY_MISMATCH", "模具类别必须与所属套别一致")
+        payload.code = identity
+        payload.mold_category = mold_set.mold_category
+    elif payload.code is None:
+        raise api_error(422, "MOLD_IDENTITY_INVALID", "旧档案逐件补录需要原有单件编号")
     frozen = db.scalar(select(StocktakeSession.id).where(StocktakeSession.location_id == location.id, StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"])).limit(1))
     if frozen is not None:
         raise api_error(409, "LOCATION_STOCKTAKE_FROZEN", "该库位正在盘点，暂不能新增模具")
     if payload.status == "READY" and location.type != "SHELF" or payload.status == "PENDING_INSPECTION" and location.type not in {"SHELF", "INSPECTION"}:
         raise api_error(422, "STATUS_LOCATION_INVALID", "状态与位置类型不一致")
-    current_count = len(db.scalars(select(Mold).where(Mold.set_id == mold_set.id, Mold.is_current.is_(True))).all())
-    if current_count >= 10:
-        raise api_error(409, "SET_FULL", "该套已有 10 个有效模具")
+    current_molds = db.scalars(select(Mold).where(Mold.set_id == mold_set.id, Mold.is_current.is_(True))).all()
+    current_count = len(current_molds)
+    if any(item.size_label.strip().rstrip("#＃").strip() == payload.size_label for item in current_molds):
+        raise api_error(409, "MOLD_CONFLICT", "套内尺码重复")
+    planned_count = expected_size_count(mold_set)
+    if planned_count is not None and current_count >= planned_count:
+        raise api_error(409, "SET_FULL", "该套码数已全部建档")
     ensure_shelf_capacity(db, {location.id: location}, [(None, location.id)])
     mold = Mold(**payload.model_dump(), is_current=True, version=1)
     db.add(mold)
     flush_or_conflict(db, "MOLD_CONFLICT", "模具编号或套内尺码重复")
-    fingerprint = hashlib.sha256(json.dumps(payload.model_dump(), ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps(payload.model_dump(mode="json"), ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     operation = Operation(request_id=str(uuid4()), payload_hash=fingerprint, type="INITIALIZE", actor_user_id=context.user.id, target_location_id=location.id, reason="维护员逐件建档")
     db.add(operation)
     db.add(OperationItem(operation=operation, mold_id=mold.id, before_status="NOT_REGISTERED", after_status=mold.status, before_location_id=None, after_location_id=location.id, before_custodian_id=None, after_custodian_id=None, before_version=0, after_version=1))
     db.add(AuditLog(actor_user_id=context.user.id, action="MOLD_CREATE", entity=mold.code, after=location.code))
     save_or_conflict(db, "MOLD_CONFLICT", "模具编号或套内尺码重复")
+    return mold_dict(mold)
+
+
+@router.patch("/molds/{mold_id}/metadata")
+def update_mold_metadata(mold_id: int, payload: MoldMetadataInput, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    require_admin(context)
+    mold = db.scalar(select(Mold).where(Mold.id == mold_id).with_for_update().execution_options(populate_existing=True))
+    if mold is None or not mold.is_current:
+        raise api_error(404, "MOLD_NOT_FOUND", "模具不存在或已停用")
+    if mold.version != payload.expected_version:
+        raise api_error(409, "VERSION_CONFLICT", "模具资料已变化，请重新读取后修改")
+    if mold.set.mold_category and "mold_category" in payload.model_fields_set and payload.mold_category != mold.set.mold_category:
+        raise api_error(422, "MOLD_CATEGORY_MISMATCH", "A/B 类别属于整套身份，不能单独修改某个码数")
+    if db.scalar(select(StocktakeSession.id).where(StocktakeSession.location_id == mold.current_location_id, StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"])).limit(1)) is not None:
+        raise api_error(409, "LOCATION_STOCKTAKE_FROZEN", "该库位正在盘点，暂不能修改模具资料")
+    before = metadata_dict(mold)
+    changes = payload.model_dump(exclude_unset=True, include=set(METADATA_FIELDS))
+    for field, value in changes.items():
+        setattr(mold, field, value)
+    after = metadata_dict(mold)
+    if before != after:
+        db.add(AuditLog(actor_user_id=context.user.id, action="MOLD_METADATA", entity=mold.code, before=json.dumps(before, ensure_ascii=False), after=json.dumps(after, ensure_ascii=False), reason=payload.reason))
+        save_or_conflict(db, "MOLD_CONFLICT", "模具资料发生冲突，请刷新后重试")
     return mold_dict(mold)
 
 
@@ -387,7 +586,7 @@ def delete_mold(mold_id: int, context: AuthContext = Depends(require_csrf), db: 
     if len(items) != 1:
         raise api_error(409, "MOLD_IN_USE", "模具已有流转记录，不能删除")
     operation = db.get(Operation, items[0].operation_id)
-    if operation is None or operation.type != "INITIALIZE" or operation.reason != "维护员逐件建档" or db.scalar(select(OperationItem.id).where(OperationItem.operation_id == operation.id, OperationItem.id != items[0].id).limit(1)) is not None:
+    if operation is None or operation.type != "INITIALIZE" or operation.reason not in {"维护员逐件建档", "维护员按款号单个建档"} or db.scalar(select(OperationItem.id).where(OperationItem.operation_id == operation.id, OperationItem.id != items[0].id).limit(1)) is not None:
         raise api_error(409, "MOLD_IN_USE", "模具已有业务记录，不能删除")
     code = mold.code
     db.delete(operation)
@@ -431,7 +630,7 @@ def dashboard(_context: AuthContext = Depends(current_context), db: Session = De
     by_set: dict[int, list[Mold]] = defaultdict(list)
     for mold in molds:
         by_set[mold.set_id].append(mold)
-    ready_sets = sum(len(group) == 10 and all(mold.status == "READY" and mold.current_location_id == mold.set.default_location_id for mold in group) for group in by_set.values())
+    ready_sets = sum(set_complete(group[0].set, group) and all(mold.status == "READY" and mold.current_location_id == mold.set.default_location_id for mold in group) for group in by_set.values())
     return {"total_molds": len(molds), "ready_molds": sum(mold.status == "READY" for mold in molds), "in_use_molds": sum(mold.status == "IN_USE" for mold in molds), "exception_molds": sum(mold.status not in {"READY", "IN_USE"} for mold in molds), "ready_sets": ready_sets, "total_sets": len(by_set)}
 
 
@@ -442,14 +641,14 @@ def set_matrix(_context: AuthContext = Depends(current_context), db: Session = D
     by_set: dict[int, list[Mold]] = defaultdict(list)
     for mold in molds:
         by_set[mold.set_id].append(mold)
-    return [{"set_id": item.id, "set_code": item.code, "name": item.model.name, "model_code": item.model.code, "default_location": item.default_location.code, "complete": len(by_set[item.id]) == 10, "items": [mold_dict(mold) for mold in by_set[item.id]]} for item in sets]
+    return [{"set_id": item.id, "set_code": item.code, "name": item.model.name, "model_code": item.model.code, "mold_category": item.mold_category, "shoe_type": item.model.shoe_type, "expected_size_count": expected_size_count(item), "size_labels": list(expected_sizes(item) or []), "default_location": item.default_location.code, "complete": set_complete(item, by_set[item.id]), "items": [mold_dict(mold) for mold in by_set[item.id]]} for item in sets]
 
 
 @router.get("/production-lines/summary")
 def production_lines(_context: AuthContext = Depends(current_context), db: Session = Depends(get_db)) -> list[dict]:
     lines = db.scalars(select(Location).where(Location.type == "LINE", Location.active.is_(True)).order_by(Location.code)).all()
     molds = db.scalars(select(Mold).where(Mold.status == "IN_USE", Mold.is_current.is_(True))).all()
-    return [{"line_id": line.id, "line_code": line.code, "sets": [{"set_code": mold_set.code, "name": mold_set.model.name, "mold_count": len(group), "sizes": [mold.size_label for mold in group], "custodians": sorted({mold.custodian.name if mold.custodian else "未记录" for mold in group})} for mold_set, group in _group_line_sets(molds, line.id)]} for line in lines]
+    return [{"line_id": line.id, "line_code": line.code, "sets": [{"set_code": mold_set.code, "model_code": mold_set.model.code, "mold_category": mold_set.mold_category, "shoe_type": mold_set.model.shoe_type, "name": mold_set.model.name, "mold_count": len(group), "sizes": [mold.size_label for mold in group], "custodians": sorted({mold.custodian.name if mold.custodian else "未记录" for mold in group})} for mold_set, group in _group_line_sets(molds, line.id)]} for line in lines]
 
 
 def _group_line_sets(molds: list[Mold], location_id: int) -> list[tuple[MoldSet, list[Mold]]]:

@@ -46,11 +46,15 @@ $env:DATABASE_URL = 'sqlite+pysqlite:///' + (((Resolve-Path '..\office-pilot-dat
 
 `/api/operations` 的领用人员取当前登录账号关联的人员。每件模具提交 `mold_id` 和查询时的 `expected_version`。一次提交使用新的 UUID `request_id`；超时后先用 `/api/operations/by-request/{request_id}` 查询结果，不要换号盲目重交。
 
-混合归还时，每个 `items` 元素可另填 `return_condition`（`READY`、`PENDING_INSPECTION` 或 `IN_REPAIR`）；后两者必须同时填写 `exception_location_id` 和至少 3 个字的 `note`。待检目标必须是待检区，送修目标必须是维修区。顶层 `target_location_id` 是完好件的普通库位；如果全批没有完好件，则填任意一件的异常目标位置。逐件实际去向和原因写入流水，整套默认库位只在 10 个当前模具全部完好归还时变化。
+混合归还时，每个 `items` 元素可另填 `return_condition`（`READY`、`PENDING_INSPECTION` 或 `IN_REPAIR`）；后两者需填写 `exception_location_id` 和至少三个字的 `note`。完好件去顶层目标普通库位，全批异常则用任意异常件目标。逐件去向和原因写入流水；只有该套计划码数已齐、所有当前件全部完好归还时才修改默认库位。历史未分类套仍按十件判断。整套归还补偿更正继续要求专项核查。
 
-批量建档模板列名依次为 `model_code`（型号编号）、`model_name`（型号名称）、`set_code`（套号）、`default_location_code`（默认普通库位）、`mold_code`（单模具编号）、`size_label`（尺码）、`status`（`READY` 或 `PENDING_INSPECTION`）、`current_location_code`（当前位置）、`original_code`（可选原编号）。每套填写 10 行且尺码不重复；默认库位必须是已维护的普通货架，当前位置须与状态相容。先在维护界面创建真实库位，再导入真实资产。CSV 需保存为 UTF-8，可带 BOM，单次上限 3 MB、5,000 行。预览只保存待确认批次，不建立库存；确认时会再次校验库位及编号，整批提交或整批回滚。系统不会把演示资料自动迁入正式库。
+新批量模板列为 `mold_number`、`shoe_type`、`mold_category`、`set_sizes`、`size_label`、`default_location_code`、`status`、`current_location_code` 和五项标签资料（manufacturer、pairs_per_mold、sole_material、initial_quarter、opened_on）。shoe_type 为男鞋/女鞋/男童/女童，留空兼容旧版默认男鞋；set_sizes 为顿号等分隔的清单，留空用相应鞋类默认十码。每款类别需完整包含清单，且各行鞋类、清单和默认库位一致。身份自动生成，普通库位容量十件。UTF-8，可带 BOM，最多 3 MB/5,000 行；预览保存批次，确认重新校验，整批提交或回滚。兼容原 model_code/model_name/set_code/mold_code 格式和旧预览，不覆盖已有模具。
 
 ## 验证
+
+标签资料新增 `manufacturer`、`mold_category`、`pairs_per_mold`、`sole_material`、`initial_quarter`、`opened_on` 六个可空字段，类别用于整套身份，其余五项支持建档和按件补录，旧模板兼容。排模双数为 1～99 的整数，季度为两位年份 + Q + 1～4，日期支持 YYYY-MM-DD / YYYY.M.D，保存为日期值。模具详情、扫码解析、标签预览与库存导出包含新增资料；二维码协议不变。
+
+`PATCH /api/molds/{id}/metadata` 仅维护员可调用，提交需要 `expected_version` 和至少三个字的 `reason`。可部分更新五项标签资料，显式传 null 可清空；已有 A/B 套不能逐件改变或清空类别；不能通过此接口改编号、尺码、位置或状态。修改记录审计并更新模具版本，盘点冻结或版本冲突返回 409。升级迁移依次为 `b18d6f024c91`（标签字段）、`c29a7d103e82`（套级类别与款号/类别唯一约束）和 `d3b8a29401f6`（款式鞋类、套内码数方案）；先停止现有服务再按根目录启动流程备份和迁移。有标签、A/B 套、鞋类或码数方案资料时，相应迁移的直接降级会被拒绝。
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -59,3 +63,7 @@ python -m unittest discover -s tests -v
 测试使用独立 SQLite，不写开发库。覆盖设备授权、领还及版本冲突、整套换位、混合归还、补偿更正、账号管理、盘点、CSV 导入导出与标签记录等。迁移使用临时 SQLite 验证升级和回退。PostgreSQL 仍需同版本环境验证。
 
 SQLite 的 API 写事务在业务读取前使用 `BEGIN IMMEDIATE`，串行保护库位容量、盘点快照和冻结；锁等待失败返回 `503 DATABASE_BUSY` 及 `Retry-After`，客户端应保留原请求重试。盘点列表始终包含未结束任务，并补充最近 50 条记录。HTTPS 代理请求的会话和设备 Cookie 使用 Secure；本机 5173 仅绑定回环地址，可信局域网测试的手机默认走 5174 HTTP，可选 HTTPS 入口为 5175。
+
+`POST /api/mold-sets` 为整套/单个建档入口，仅维护员且需 CSRF：提交 `mold_number`、`shoe_type`（男鞋/女鞋/女童/男童，默认男鞋）、`mold_category`（默认 A模）、`default_location_id` 和五项标签资料。`mode=SET`（默认）建立计划中缺少的码数；`mode=SINGLE` 必须带 `size_label`，只建立一个码数。可传 `size_labels` 自定义 1～100 个不重复整数/半码，未传采用鞋类默认模板；已有套使用原计划，显式传不同计划返回 409。同款鞋类不一致返回 409，已建码数不重复，已有件资料与默认库位不变。本次新增及初始化流水单一事务提交，回包有 created_count、expected_size_count、size_count、complete。旧 models/sets/molds 接口保留兼容。详情、套列表、齐套矩阵及产线返回 shoe_type；库存导出新增鞋类。二维码仍使用单件 code，八行标签不增加鞋类行。
+
+码段默认值及官方参考来源见根目录 README；均为可调整模板。升级前已明确 A/B 的套曾限定男鞋十码，迁移只对关联款式标记男鞋；未分类历史套的鞋类仍为空，编号、码数、位置、版本和流水不改。

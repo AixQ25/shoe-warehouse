@@ -15,6 +15,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from .auth import AuthContext, api_error, current_context, get_db, require_admin, require_csrf, require_device, require_operator
 from .capacity import ensure_shelf_capacity
+from .mold_metadata import set_complete
 from .models import AuditLog, Location, Mold, MoldSet, Operation, OperationItem, StocktakeSession
 
 router = APIRouter(prefix="/api/operations", tags=["operations"])
@@ -142,7 +143,7 @@ def correct_operation(operation_id: int, payload: CorrectionInput, context: Auth
     if original.type == "RETURN":
         for set_id in {mold.set_id for mold in molds}:
             members = db.scalars(select(Mold).where(Mold.set_id == set_id, Mold.is_current.is_(True))).all()
-            if len(members) == 10 and all(member.id in by_id and by_id[member.id].after_status == "READY" for member in members):
+            if set_complete(members[0].set, members) and all(member.id in by_id and by_id[member.id].after_status == "READY" for member in members):
                 raise api_error(409, "FULL_SET_RETURN_REVIEW", "整套归还可能改变默认库位，请专项核查后处理，不能直接冲销")
     ensure_shelf_capacity(db, {location.id: location for location in locations}, [(mold.current_location_id, by_id[mold.id].before_location_id) for mold in molds])
     operation = Operation(request_id=str(payload.request_id), payload_hash=fingerprint, type="CORRECTION", actor_user_id=context.user.id, target_location_id=items[0].before_location_id, reason=payload.reason.strip(), correction_of_operation_id=original.id)
@@ -254,7 +255,7 @@ def submit_operation(payload: OperationInput, request: Request, context: AuthCon
         sets = db.scalars(select(MoldSet).where(MoldSet.id.in_(set_ids)).order_by(MoldSet.id).with_for_update()).all()
         for mold_set in sets:
             members = db.scalars(select(Mold).where(Mold.set_id == mold_set.id, Mold.is_current.is_(True)).order_by(Mold.id).with_for_update()).all()
-            if len(members) == 10 and all(member.id in chosen_ids and return_items[member.id].return_condition == "READY" for member in members) and mold_set.default_location_id != target.id:
+            if set_complete(members[0].set, members) and all(member.id in chosen_ids and return_items[member.id].return_condition == "READY" for member in members) and mold_set.default_location_id != target.id:
                 old = mold_set.default_location_id
                 mold_set.default_location_id = target.id
                 db.add(AuditLog(actor_user_id=context.user.id, action="FULL_SET_RETURN_RELOCATE", entity=mold_set.code, before=str(old), after=str(target.id), reason="整套完好归还换位"))

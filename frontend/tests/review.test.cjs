@@ -54,7 +54,7 @@ function component(name, api) {
   const jsx = { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }
   const actualApi = sharedApi
   let sequence = 0
-  const renderComponent = load(name, { react: hooks, 'react/jsx-runtime': jsx, './liveApi': { ...actualApi, api }, './requestId': { newRequestId: () => `new-request-${++sequence}` }, './CameraScanner': {}, './WarehouseUI': {} }).default
+  const renderComponent = load(name, { react: hooks, 'react/jsx-runtime': jsx, './liveApi': { ...actualApi, api }, './requestId': { newRequestId: () => `new-request-${++sequence}` }, './CameraScanner': {}, './WarehouseUI': {}, './MoldMetadataFields': {}, './MoldMetadataEditor': {} }).default
   return {
     render(props) {
       cursor = 0
@@ -217,4 +217,63 @@ test('API preserves retryable database error and aborts timed-out requests', asy
   window.setTimeout = (callback) => { queueMicrotask(callback); return 1 }
   global.fetch = (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))))
   await assert.rejects(api('/operations'), /请求超时/)
+})
+
+test('master creates a complete style/category through one request without manual model or set numbers', async () => {
+  const writes = []
+  const ui = component('./LiveMasterPage', async (path, init) => {
+    if (init) { writes.push({ path, body: JSON.parse(init.body) }); return { id: 1, created_count: 10 } }
+    return []
+  })
+  const masterProps = { ...props, user: { ...user, role: 'ADMIN' } }
+  let tree = ui.render(masterProps)
+  await tick()
+  function field(label) { return nodes(tree).find((node) => node.type === 'label' && text(node).startsWith(label)).props.children.find((node) => node?.type === 'input' || node?.type === 'select') }
+  field('模具编号（款号）').props.onChange({ target: { value: 'QD-264301' } })
+  tree = ui.render(masterProps)
+  field('模具类别').props.onChange({ target: { value: 'B模' } })
+  field('初始库位（仅新增码数）').props.onChange({ target: { value: '1' } })
+  tree = ui.render(masterProps)
+  const form = nodes(tree).find((node) => node.type === 'form' && text(node).includes('模具建档与生成'))
+  form.props.onSubmit({ preventDefault() {} })
+  await tick()
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].path, '/mold-sets')
+  assert.equal(writes[0].body.mold_number, 'QD-264301')
+  assert.equal(writes[0].body.mold_category, 'B模')
+  assert.equal(writes[0].body.shoe_type, '男鞋')
+  assert.equal(writes[0].body.mode, 'SET')
+  assert.equal(writes[0].body.default_location_id, 1)
+  assert.equal('set_code' in writes[0].body, false)
+  assert.equal('mold_code' in writes[0].body, false)
+  assert.equal(text(tree).includes('型号'), false)
+  assert.equal(text(tree).includes('套号'), false)
+})
+
+test('master switches shoe presets and creates one women half-size without obsolete fields', async () => {
+  const writes = []
+  const ui = component('./LiveMasterPage', async (path, init) => {
+    if (init) { writes.push({ path, body: JSON.parse(init.body) }); return { created_count: 1 } }
+    return []
+  })
+  const masterProps = { ...props, user: { ...user, role: 'ADMIN' } }
+  let tree = ui.render(masterProps); await tick()
+  function change(label, value) {
+    tree = ui.render(masterProps)
+    const field = nodes(tree).find((node) => node.type === 'label' && text(node).startsWith(label)).props.children.find((node) => node?.type === 'input' || node?.type === 'select')
+    field.props.onChange({ target: { value } })
+  }
+  change('鞋类', '女鞋')
+  change('模具编号（款号）', 'W-01')
+  button(ui.render(masterProps), '单个生成').props.onClick()
+  change('本次生成码数', '35.5')
+  change('初始库位', '1')
+  tree = ui.render(masterProps)
+  nodes(tree).find((node) => node.type === 'form' && text(node).includes('模具建档与生成')).props.onSubmit({ preventDefault() {} })
+  await tick()
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].body.shoe_type, '女鞋')
+  assert.equal(writes[0].body.mode, 'SINGLE')
+  assert.equal(writes[0].body.size_label, '35.5')
+  assert.deepEqual(writes[0].body.size_labels, ['35.5', '36', '36.5', '37.5', '38', '38.5', '39', '40', '40.5', '41'])
 })

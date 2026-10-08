@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .auth import AuthContext, api_error, current_context, get_db, require_csrf
 from .models import LabelPrintBatch, Location, Mold
+from .mold_metadata import metadata_dict
 
 
 router = APIRouter(prefix="/api/labels", tags=["labels"])
@@ -40,7 +41,7 @@ def resolve_labels(selection: LabelSelection, db: Session) -> list[dict]:
         raise api_error(422, "LABEL_CODES_INVALID", "标签编号不能为空、重复或超过 80 字符")
     if selection.kind == "MOLD":
         found = db.scalars(select(Mold).where(func.upper(Mold.code).in_(codes), Mold.is_current.is_(True))).all()
-        labels = {item.code.upper(): {"kind": "MOLD", "code": item.code, "qr_content": f"MOLD:{item.code}", "model_code": item.set.model.code, "set_code": item.set.code, "size_label": item.size_label, "name": item.set.model.name} for item in found}
+        labels = {item.code.upper(): {"kind": "MOLD", "code": item.code, "mold_number": item.set.model.code, "qr_content": f"MOLD:{item.code}", "model_code": item.set.model.code, "set_code": item.set.code, "size_label": item.size_label, "name": item.set.model.name, **metadata_dict(item)} for item in found}
     else:
         found = db.scalars(select(Location).where(func.upper(Location.code).in_(codes), Location.active.is_(True))).all()
         labels = {item.code.upper(): {"kind": "LOCATION", "code": item.code, "qr_content": f"LOC:{item.code}", "name": item.name} for item in found}

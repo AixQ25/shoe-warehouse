@@ -184,7 +184,7 @@ class MainActivity : ComponentActivity() {
 
     private fun searchMolds() {
         val query = state.searchQuery.trim()
-        if (query.isBlank()) { state.error = "请输入模具编号、套号或型号"; return }
+        if (query.isBlank()) { state.error = "请输入款号、类别或码数"; return }
         state.searchResults.clear()
         state.searchSubmitted = false
         job {
@@ -273,11 +273,11 @@ class MainActivity : ComponentActivity() {
         if (state.pending) { state.error = "请先确认上次提交结果"; return false }
         if (state.mode == "RETURN" && state.targetId == null) { state.error = "请先扫描实际归还库位"; return false }
         val required = if (state.mode == "ISSUE") "READY" else "IN_USE"
-        if (mold.status != required) { state.error = "${mold.code} 当前状态不适合${if (state.mode == "ISSUE") "领用" else "归还"}"; return false }
-        if (state.cart.any { it.id == mold.id }) { state.message = "${mold.code} 已在清单中"; return false }
+        if (mold.status != required) { state.error = "${mold.displayName} 当前状态不适合${if (state.mode == "ISSUE") "领用" else "归还"}"; return false }
+        if (state.cart.any { it.id == mold.id }) { state.message = "${mold.displayName} 已在清单中"; return false }
         if (state.cart.isEmpty()) { state.draftOwnerId = state.user?.optInt("id"); state.draftServer = api.baseUrl }
         state.cart.add(mold)
-        state.message = "已加入清单：${mold.code}（尚未登记库存）"
+        state.message = "已加入清单：${mold.displayName}（尚未登记库存）"
         saveDraft()
         return true
     }
@@ -424,7 +424,7 @@ class MainActivity : ComponentActivity() {
         val items = JSONArray()
         state.cart.forEach { mold ->
             items.put(JSONObject().put("id", mold.id).put("code", mold.code).put("set_code", mold.setCode)
-                .put("model_code", mold.modelCode).put("name", mold.modelName).put("size_label", mold.size).put("status", mold.status)
+                .put("model_code", mold.modelCode).put("mold_number", mold.moldNumber).put("mold_category", mold.moldCategory).put("shoe_type", mold.shoeType).put("name", mold.modelName).put("size_label", mold.size).put("status", mold.status)
                 .put("version", mold.version).put("current_location", mold.currentLocation)
                 .put("default_location_id", mold.defaultLocationId).put("default_location", mold.defaultLocation)
                 .put("custodian", mold.custodian))
@@ -625,7 +625,7 @@ class MainActivity : ComponentActivity() {
             value = s.searchQuery,
             onValueChange = { s.searchQuery = it; s.searchSubmitted = false; s.searchResults.clear(); s.error = "" },
             label = { Text("搜索模具") },
-            placeholder = { Text("模具编号、套号或型号") },
+            placeholder = { Text("款号、类别或码数") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); searchMolds() }),
@@ -649,11 +649,12 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically) {
-                                Text(mold.code, color = ink, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                Text(mold.displayName, color = ink, fontWeight = FontWeight.Black, fontSize = 18.sp,
+                                    modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(moldStatusLabel(mold.status), color = if (mold.status == "READY") ink else muted,
                                     fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
-                            Text("${mold.setCode} · ${mold.modelName.ifBlank { mold.modelCode }} · ${mold.size} 码",
+                            Text("默认库位 ${mold.defaultLocation}",
                                 color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text("当前位置", color = muted, fontSize = 12.sp, modifier = Modifier.padding(top = 7.dp))
                             Text(locationText, color = ink, fontWeight = FontWeight.Black, fontSize = 19.sp)
@@ -767,7 +768,7 @@ class MainActivity : ComponentActivity() {
         if (!needsShelf) {
             s.results.forEach { mold ->
                 OutlinedButton(onClick = { addMold(mold) }, enabled = !s.pending, modifier = Modifier.fillMaxWidth()) {
-                    Text("${mold.code} · ${mold.setCode} · 加入清单", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${mold.displayName} · 加入清单", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -788,8 +789,8 @@ class MainActivity : ComponentActivity() {
             Surface(color = Color.White, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFFDCE2D8), RoundedCornerShape(6.dp))) {
                 Row(Modifier.padding(11.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(mold.code, color = ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text("${mold.setCode} · ${mold.modelCode} · ${mold.size}", color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(mold.displayName, color = ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text("当前位置 ${mold.currentLocation}", color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (!s.pending && !s.confirmVisible) TextButton(onClick = {
                         s.cart.remove(mold); s.requestId = newRequestId(); saveDraft()

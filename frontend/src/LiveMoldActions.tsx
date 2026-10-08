@@ -4,6 +4,7 @@ import { api, csrfToken } from './liveApi'
 import type { LiveMold, Location, SessionUser } from './liveApi'
 import { Drawer, StatusBadge } from './WarehouseUI'
 import './LiveMoldActions.css'
+import { moldLabelRows, moldName } from './moldLabel'
 
 type Action = 'RETURN_FOR_INSPECTION' | 'SEND_REPAIR' | 'REPAIR_COMPLETE' | 'INSPECTION_PASS' | 'SCRAP' | 'FOUND'
 const actionNames: Record<Action, string> = { RETURN_FOR_INSPECTION: '异常归还待检', SEND_REPAIR: '送修', REPAIR_COMPLETE: '维修完成', INSPECTION_PASS: '检验通过', SCRAP: '报废', FOUND: '核查找回' }
@@ -78,8 +79,9 @@ export default function LiveMoldActions({ mold, locations, user, onClose, onChan
     finally { setBusy(false) }
   }
 
-  return <Drawer title={mold.code} onClose={onClose} className="live-mold-detail">
-    <div className="mold-profile"><div><span>编号</span><strong>{mold.code}</strong></div><div><span>型号 / 套号</span><strong>{mold.model_code} · {mold.set_code}</strong></div><div><span>尺码</span><strong>{mold.size_label}</strong></div><div><span>状态</span><StatusBadge status={mold.status} /></div><div><span>当前位置</span><strong>{mold.current_location}</strong></div><div><span>默认库位</span><strong>{mold.default_location}</strong></div><div><span>当前责任人</span><strong>{mold.custodian ?? '—'}</strong></div></div>
+  return <Drawer title={moldName(mold)} onClose={onClose} className="live-mold-detail">
+    <div className="mold-profile">{moldLabelRows({ ...mold, kind: 'MOLD', qr_content: `MOLD:${mold.code}` }).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value}</strong></div>)}</div>
+    <div className="mold-profile"><div><span>状态</span><StatusBadge status={mold.status} /></div><div><span>当前位置</span><strong>{mold.current_location}</strong></div><div><span>默认库位</span><strong>{mold.default_location}</strong></div><div><span>当前责任人</span><strong>{mold.custodian ?? '—'}</strong></div></div>
     {user.role !== 'READONLY' && <div className="live-mold-action-panel"><h3>异常状态处理</h3>{user.role !== 'ADMIN' && !authorized && <p>当前设备未授权，不能提交异常操作。</p>}{actions.length ? <><select aria-label="选择异常操作" value={action} onChange={(event) => chooseAction(event.target.value as Action | '')}><option value="">选择适用操作</option>{actions.map((item) => <option value={item} key={item}>{actionNames[item]}</option>)}</select>{action === 'FOUND' && <select aria-label="找回后状态" value={foundStatus} onChange={(event) => { setFoundStatus(event.target.value as 'READY' | 'PENDING_INSPECTION'); setTargetId(null); setRequestId(newRequestId()) }}><option value="PENDING_INSPECTION">先待检</option><option value="READY">确认可用</option></select>}{action && <select aria-label="异常操作目标位置" value={targetId ?? ''} onChange={(event) => { setTargetId(event.target.value ? Number(event.target.value) : null); setRequestId(newRequestId()) }}><option value="">选择实际目标位置</option>{targets.map((item) => <option value={item.id} key={item.id}>{item.name} · {item.code}</option>)}</select>}{action && <textarea aria-label="异常操作原因" value={reason} onChange={(event) => { setReason(event.target.value); setRequestId(newRequestId()) }} placeholder="记录现场检查情况和原因" maxLength={300} rows={3} />}{action && <button className="primary-button" type="button" disabled={busy || !authorized} onClick={() => void submit()}>确认{actionNames[action]}</button>}{action && <button className="secondary-button" type="button" disabled={busy} onClick={() => void checkRequest()}>查询本次提交结果</button>}</> : <p>当前状态没有适用的异常操作。</p>}</div>}
     {notice && <div className="live-work-notice" role="status">{notice}</div>}
   </Drawer>

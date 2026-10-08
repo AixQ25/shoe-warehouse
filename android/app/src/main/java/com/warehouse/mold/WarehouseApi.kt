@@ -23,8 +23,10 @@ data class Mold(
     val id: Int, val code: String, val setCode: String, val modelCode: String,
     val size: String, val status: String, val version: Int,
     val currentLocation: String, val defaultLocationId: Int, val defaultLocation: String,
-    val custodian: String?, val modelName: String
+    val custodian: String?, val modelName: String,
+    val moldNumber: String = modelCode, val moldCategory: String? = null, val shoeType: String? = null
 ) {
+    val displayName: String get() = "$moldNumber · ${moldCategory ?: "历史未分类"}${shoeType?.let { " · $it" } ?: ""} · ${size.trimEnd('#', '＃')}#"
     companion object {
         fun from(json: JSONObject) = Mold(
             json.getInt("id"), json.getString("code"), json.getString("set_code"),
@@ -32,7 +34,9 @@ data class Mold(
             json.getInt("version"), json.getString("current_location"),
             json.getInt("default_location_id"), json.getString("default_location"),
             json.optString("custodian").takeIf { it.isNotBlank() && it != "null" },
-            json.optString("name")
+            json.optString("name"), json.optString("mold_number").takeIf { it.isNotBlank() && it != "null" } ?: json.getString("model_code"),
+            json.optString("mold_category").takeIf { it.isNotBlank() && it != "null" },
+            json.optString("shoe_type").takeIf { it.isNotBlank() && it != "null" }
         )
     }
 }

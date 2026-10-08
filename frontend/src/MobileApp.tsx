@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import CameraScanner from './CameraScanner'
 import { newRequestId } from './requestId'
+import { moldName } from './moldLabel'
 import { api, csrfToken, rejectedSubmission, sessionExpired } from './liveApi'
 import { clearPending, readPending, rememberPending } from './pendingOperation'
 import type { OperationPayload } from './pendingOperation'
@@ -212,7 +213,7 @@ export default function MobileApp() {
     event.preventDefault()
     if (workLocked) return
     const value = query.trim()
-    if (!value) { setError('请输入模具、套号或型号'); return }
+    if (!value) { setError('请输入款号、类别或码数'); return }
     if (/^(MOLD|LOC):/i.test(value)) { await resolveCode(value); return }
     setBusy(true)
     setError('')
@@ -258,14 +259,14 @@ export default function MobileApp() {
 
   return <div className="mobile-app"><div className="mobile-inner">
     <header className="mobile-header"><div><span>鞋模具仓库</span><h1>查模具</h1></div><button type="button" onClick={() => void logout()} disabled={busy}>退出</button></header>
-    <form className="mobile-search" onSubmit={(event) => void search(event)}><label htmlFor="mobile-query">编号查询</label><div><input id="mobile-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="模具编号、套号或型号" autoComplete="off" /><button className="mobile-primary" type="submit" disabled={busy}>查询</button></div></form>
+    <form className="mobile-search" onSubmit={(event) => void search(event)}><label htmlFor="mobile-query">编号查询</label><div><input id="mobile-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="款号、类别或码数" autoComplete="off" /><button className="mobile-primary" type="submit" disabled={busy}>查询</button></div></form>
     <section className="mobile-scan"><div className="mobile-section-title"><h2>扫码</h2><span>扫描标签查看当前信息</span></div><div className="mobile-scan-actions">{canUseLiveCamera && <button className="mobile-primary" type="button" disabled={workLocked} onClick={() => setCameraOpen(!cameraOpen)}>{cameraOpen ? '关闭摄像头' : '实时扫码'}</button>}<label className={`mobile-photo-button${canUseLiveCamera ? '' : ' mobile-photo-primary'}`}>{canUseLiveCamera ? '拍照识别' : '拍照扫码'}<input disabled={workLocked} type="file" accept="image/*" capture="environment" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void readPhoto(file) }} /></label></div>{cameraOpen && !workLocked && canUseLiveCamera && <CameraScanner active={cameraOpen} onCode={(code) => void resolveCode(code)} />}</section>
     {busy && <p className="mobile-feedback" role="status">正在读取…</p>}
     {error && <p className="mobile-error" role="alert">{error}</p>}
     {notice && <p className="mobile-feedback" role="status">{notice}</p>}
     {pendingError && <p className="mobile-error" role="alert">{pendingError}</p>}
     {pending && pendingOwner === user.id && <section className="mobile-work"><p>原提交结果待确认：{pending.request_id}</p><button type="button" disabled={busy} onClick={() => void checkRequest()}>查询原提交结果</button><button type="button" disabled={busy} onClick={() => void retryPending()}>按原请求编号重试</button></section>}
-    {selected?.kind === 'MOLD' && <section className="mobile-detail"><div className="mobile-section-title"><h2>模具信息</h2><StatusBadge status={selected.mold.status} /></div><strong className="mobile-code">{selected.mold.code}</strong><dl><div><dt>套号</dt><dd>{selected.mold.set_code}</dd></div><div><dt>型号</dt><dd>{selected.mold.model_code}</dd></div><div><dt>尺码</dt><dd>{selected.mold.size_label}</dd></div><div><dt>当前位置</dt><dd>{selected.mold.current_location}</dd></div><div><dt>默认库位</dt><dd>{selected.mold.default_location}</dd></div><div><dt>责任人</dt><dd>{selected.mold.custodian ?? '—'}</dd></div></dl><button className="mobile-refresh" type="button" onClick={() => void resolveCode(selected.mold.code)} disabled={busy}>刷新这件模具</button>{total !== null && <button className="mobile-back-results" type="button" onClick={() => setSelected(null)}>返回查询结果</button>}</section>}
+    {selected?.kind === 'MOLD' && <section className="mobile-detail"><div className="mobile-section-title"><h2>模具信息</h2><StatusBadge status={selected.mold.status} /></div><strong className="mobile-code">{moldName(selected.mold)}</strong><dl><div><dt>鞋类</dt><dd>{selected.mold.shoe_type || '历史未分类'}</dd></div><div><dt>类别</dt><dd>{selected.mold.mold_category || '历史未分类'}</dd></div><div><dt>款号</dt><dd>{selected.mold.mold_number || selected.mold.model_code}</dd></div><div><dt>尺码</dt><dd>{selected.mold.size_label}</dd></div><div><dt>当前位置</dt><dd>{selected.mold.current_location}</dd></div><div><dt>默认库位</dt><dd>{selected.mold.default_location}</dd></div><div><dt>责任人</dt><dd>{selected.mold.custodian ?? '—'}</dd></div></dl><button className="mobile-refresh" type="button" onClick={() => void resolveCode(selected.mold.code)} disabled={busy}>刷新这件模具</button>{total !== null && <button className="mobile-back-results" type="button" onClick={() => setSelected(null)}>返回查询结果</button>}</section>}
     {selectedMold && mode && canOperate && <section className="mobile-work">
       <div className="mobile-section-title"><h2>{mode === 'ISSUE' ? '领用这件模具' : '完好归还这件模具'}</h2></div>
       <div className="mobile-device-status"><span>当前手机：{device === null ? '正在读取状态' : device.authorized ? `已授权 · ${device.label}` : device.registered && !device.revoked ? '已登记，等待电脑端授权' : '尚未登记'}</span><button type="button" onClick={() => void refreshDevice()} disabled={busy}>刷新授权状态</button></div>
@@ -281,6 +282,6 @@ export default function MobileApp() {
       {submissionUncertain && <button className="mobile-check-request" type="button" disabled={busy} onClick={() => void checkRequest()}>查询本次提交结果</button>}
     </section>}
     {selected?.kind === 'LOCATION' && <section className="mobile-detail"><div className="mobile-section-title"><h2>库位信息</h2></div><strong className="mobile-code">{selected.location.code}</strong><p>{selected.location.name}</p></section>}
-    {total !== null && !selected && <section className="mobile-results"><div className="mobile-section-title"><h2>查询结果</h2><span>共 {total} 个</span></div>{matches.length ? matches.map((mold) => <button className="mobile-result" type="button" key={mold.id} onClick={() => selectMold(mold)}><span><strong>{mold.code}</strong><small>{mold.set_code} · {mold.size_label} 码 · {mold.current_location}</small></span><StatusBadge status={mold.status} /></button>) : <EmptyState>没有找到匹配的模具</EmptyState>}{total > matches.length && <p className="mobile-more">仅显示前 {matches.length} 个，请输入更完整的编号。</p>}</section>}
+    {total !== null && !selected && <section className="mobile-results"><div className="mobile-section-title"><h2>查询结果</h2><span>共 {total} 个</span></div>{matches.length ? matches.map((mold) => <button className="mobile-result" type="button" key={mold.id} onClick={() => selectMold(mold)}><span><strong>{moldName(mold)}</strong><small>{mold.current_location}</small></span><StatusBadge status={mold.status} /></button>) : <EmptyState>没有找到匹配的模具</EmptyState>}{total > matches.length && <p className="mobile-more">仅显示前 {matches.length} 个，请输入更完整的编号。</p>}</section>}
   </div></div>
 }
