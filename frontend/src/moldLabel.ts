@@ -24,7 +24,7 @@ function chineseNumber(value: number): string {
   return `${tens === 1 ? '' : digits[tens]}十${units ? digits[units] : ''}`
 }
 
-export function moldLabelRows(label: LabelData): [string, string][] {
+export function moldProfileRows(label: LabelData): [string, string][] {
   const size = label.size_label?.trim().replace(/[#＃]+$/, '').trim()
   const date = label.opened_on?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   return [
@@ -37,6 +37,10 @@ export function moldLabelRows(label: LabelData): [string, string][] {
     ['初始季度', label.initial_quarter || '—'],
     ['开制日期', date ? `${date[1]}.${Number(date[2])}.${Number(date[3])}` : '—'],
   ]
+}
+
+export function moldLabelRows(label: LabelData): [string, string][] {
+  return moldProfileRows(label).filter(([field]) => field !== '排模双数')
 }
 
 export const standardSizes = ['39', '40', '40.5', '41', '42', '42.5', '43', '44', '44.5', '45']

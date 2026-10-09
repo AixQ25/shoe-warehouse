@@ -4,6 +4,7 @@ import csv
 import io
 import os
 import unittest
+from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
@@ -115,3 +116,85 @@ class StandardSetTest(unittest.TestCase):
         for size in ("NaN", "Infinity", "1e999999999", "38", "44.75"):
             with self.assertRaises(ValueError):
                 standard_size(size)
+
+    def test_delete_whole_set_member_preserves_other_members_and_can_refill(self):
+        headers = self.headers()
+        created = self.create(headers).json()
+        members = self.admin.get("/api/molds?q=QD-264301").json()["items"]
+        target = next(item for item in members if item["size_label"] == "42.5")
+        remaining = [item for item in members if item["id"] != target["id"]]
+        deleted = self.admin.delete(f"/api/molds/{target['id']}", headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(self.admin.get("/api/molds?q=QD-264301").json()["items"], remaining)
+        mold_set = next(item for item in self.admin.get("/api/sets").json() if item["id"] == created["id"])
+        self.assertEqual((mold_set["size_count"], mold_set["complete"]), (9, False))
+        self.assertEqual(mold_set["size_labels"], list(STANDARD_SIZES))
+        with self.factory() as db:
+            self.assertEqual(len(db.scalar(select(Operation)).items), 9)
+        filled = self.create(headers)
+        self.assertEqual(filled.status_code, 200, filled.text)
+        self.assertEqual((filled.json()["created_count"], filled.json()["size_count"], filled.json()["complete"]), (1, 10, True))
+        self.assertEqual(self.admin.get("/api/molds?q=QD-264301-A-42.5").json()["total"], 1)
+
+    def test_deleting_last_initialized_member_removes_empty_operation(self):
+        headers = self.headers()
+        created = self.create(headers).json()
+        for member in self.admin.get("/api/molds?q=QD-264301").json()["items"]:
+            deleted = self.admin.delete(f"/api/molds/{member['id']}", headers=headers)
+            self.assertEqual(deleted.status_code, 200, deleted.text)
+        with self.factory() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(Operation)), 0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(OperationItem)), 0)
+            self.assertIsNotNone(db.get(MoldSet, created["id"]))
+        self.assertEqual(self.admin.delete(f"/api/sets/{created['id']}", headers=headers).status_code, 200)
+
+    def test_single_generated_member_can_be_deleted_but_worker_cannot(self):
+        headers = self.headers()
+        created = self.admin.post("/api/mold-sets", json={"mold_number": "SINGLE", "mold_category": "B模", "shoe_type": "女鞋", "mode": "SINGLE", "size_label": "35.5", "default_location_id": self.shelf_b}, headers=headers)
+        self.assertEqual(created.status_code, 200, created.text)
+        member = self.admin.get("/api/molds?q=SINGLE").json()["items"][0]
+        path = f"/api/molds/{member['id']}"
+        worker_headers = {"X-CSRF-Token": self.login(self.worker, "zhangsan", "StrongWorkerPass-123")}
+        self.assertEqual(self.worker.delete(path, headers=worker_headers).status_code, 403)
+        self.assertEqual(self.admin.delete(path).status_code, 403)
+        self.assertEqual(self.admin.delete(path, headers=headers).status_code, 200)
+        self.assertEqual(self.admin.delete(path, headers=headers).status_code, 404)
+
+    def test_printed_or_frozen_member_cannot_be_deleted(self):
+        headers = self.headers()
+        self.assertEqual(self.create(headers).status_code, 200)
+        members = self.admin.get("/api/molds?q=QD-264301").json()["items"]
+        printed = self.admin.post("/api/labels/print-record", json={"request_id": str(uuid4()), "kind": "MOLD", "codes": [members[0]["code"]], "purpose": "INITIAL"}, headers=headers)
+        self.assertEqual(printed.status_code, 200, printed.text)
+        rejected = self.admin.delete(f"/api/molds/{members[0]['id']}", headers=headers)
+        self.assertEqual((rejected.status_code, rejected.json()["detail"]["error_code"]), (409, "MOLD_IN_USE"))
+        for status in ("ACTIVE", "SUBMITTED"):
+            with self.factory() as db:
+                frozen = db.scalar(select(StocktakeSession).where(StocktakeSession.location_id == self.shelf_b))
+                if frozen is None:
+                    db.add(StocktakeSession(location_id=self.shelf_b, status=status, created_by_user_id=1))
+                else:
+                    frozen.status = status
+                db.commit()
+            rejected = self.admin.delete(f"/api/molds/{members[1]['id']}", headers=headers)
+            self.assertEqual((rejected.status_code, rejected.json()["detail"]["error_code"]), (409, "LOCATION_STOCKTAKE_FROZEN"))
+        self.assertEqual(self.admin.get("/api/molds?q=QD-264301").json()["items"], members)
+        with self.factory() as db:
+            self.assertEqual(len(db.scalar(select(Operation)).items), 10)
+
+    def test_used_member_is_protected_while_unused_sibling_can_be_deleted(self):
+        headers = self.headers()
+        self.assertEqual(self.create(headers).status_code, 200)
+        members = self.admin.get("/api/molds?q=QD-264301").json()["items"]
+        csrf = self.login(self.worker, "zhangsan", "StrongWorkerPass-123")
+        device = self.worker.post("/api/devices/register", json={"label": "删除保护隔离测试"}, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(device.status_code, 200, device.text)
+        self.assertEqual(self.admin.post(f"/api/devices/{device.json()['id']}/authorize", headers=headers).status_code, 200)
+        issued = core.CoreFlowTest.submit(self, "ISSUE", self.line, [members[0]["id"]], [1], csrf)
+        self.assertEqual(issued.status_code, 200, issued.text)
+        before = self.admin.get(f"/api/molds/{members[0]['id']}").json()
+        rejected = self.admin.delete(f"/api/molds/{members[0]['id']}", headers=headers)
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+        self.assertEqual(self.admin.get(f"/api/molds/{members[0]['id']}").json(), before)
+        self.assertEqual(self.admin.delete(f"/api/molds/{members[1]['id']}", headers=headers).status_code, 200)
+        self.assertEqual(self.admin.get(f"/api/operations/{issued.json()['id']}").json(), issued.json())

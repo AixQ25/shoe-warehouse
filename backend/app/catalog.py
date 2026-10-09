@@ -574,9 +574,18 @@ def update_mold_metadata(mold_id: int, payload: MoldMetadataInput, context: Auth
 @router.delete("/molds/{mold_id}")
 def delete_mold(mold_id: int, context: AuthContext = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
     require_admin(context)
-    mold = db.scalar(select(Mold).where(Mold.id == mold_id).with_for_update())
+    candidate = db.get(Mold, mold_id)
+    if candidate is None:
+        raise api_error(404, "MOLD_NOT_FOUND", "模具不存在")
+    # Use the same location -> set -> mold order as catalog creation. The set
+    # lock also serializes removal of members sharing an initialization record.
+    location = db.scalar(select(Location).where(Location.id == candidate.current_location_id).with_for_update())
+    db.scalar(select(MoldSet).where(MoldSet.id == candidate.set_id).with_for_update())
+    mold = db.scalar(select(Mold).where(Mold.id == mold_id).with_for_update().execution_options(populate_existing=True))
     if mold is None:
         raise api_error(404, "MOLD_NOT_FOUND", "模具不存在")
+    if db.scalar(select(StocktakeSession.id).where(StocktakeSession.location_id == location.id, StocktakeSession.status.in_(["ACTIVE", "SUBMITTED"])).limit(1)) is not None:
+        raise api_error(409, "LOCATION_STOCKTAKE_FROZEN", "该库位正在盘点，暂不能删除模具")
     for model in (StocktakeExpected, StocktakeScan, StocktakeAdjustment):
         if db.scalar(select(model.id).where(model.mold_id == mold_id).limit(1)) is not None:
             raise api_error(409, "MOLD_IN_USE", "模具已有盘点记录，不能删除")
@@ -586,12 +595,16 @@ def delete_mold(mold_id: int, context: AuthContext = Depends(require_csrf), db: 
     if len(items) != 1:
         raise api_error(409, "MOLD_IN_USE", "模具已有流转记录，不能删除")
     operation = db.get(Operation, items[0].operation_id)
-    if operation is None or operation.type != "INITIALIZE" or operation.reason not in {"维护员逐件建档", "维护员按款号单个建档"} or db.scalar(select(OperationItem.id).where(OperationItem.operation_id == operation.id, OperationItem.id != items[0].id).limit(1)) is not None:
+    if operation is None or operation.type != "INITIALIZE" or operation.reason not in {"维护员逐件建档", "维护员按款号单个建档", "维护员按款号和套别整套建档"}:
         raise api_error(409, "MOLD_IN_USE", "模具已有业务记录，不能删除")
     code = mold.code
-    db.delete(operation)
+    operation_id = operation.id
+    db.delete(items[0])
+    db.flush()
+    if db.scalar(select(OperationItem.id).where(OperationItem.operation_id == operation_id).limit(1)) is None:
+        db.delete(operation)
     db.delete(mold)
-    db.add(AuditLog(actor_user_id=context.user.id, action="MOLD_DELETE", entity=code, before=f"撤销逐件建档 #{operation.id}"))
+    db.add(AuditLog(actor_user_id=context.user.id, action="MOLD_DELETE", entity=code, before=f"撤销单件建档 #{operation_id}"))
     save_or_conflict(db, "MOLD_IN_USE", "模具已被业务记录引用，不能删除")
     return {"id": mold_id, "code": code}
 

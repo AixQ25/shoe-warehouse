@@ -6,11 +6,11 @@ const ts = require('typescript')
 const source = fs.readFileSync(path.join(__dirname, '../src/moldLabel.ts'), 'utf8')
 const moduleUnderTest = { exports: {} }
 new Function('module', 'exports', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(moduleUnderTest, moduleUnderTest.exports)
-const { moldLabelRows, moldName, setName, standardSizes } = moduleUnderTest.exports
+const { moldLabelRows, moldProfileRows, moldName, setName, standardSizes } = moduleUnderTest.exports
 
-test('label displays the eight agreed fields and date format', () => {
+test('label displays the seven agreed fields and date format', () => {
   assert.deepEqual(moldLabelRows({ kind: 'MOLD', code: 'QD-264301-A-42', mold_number: 'QD-264301', manufacturer: '弘晟', mold_category: 'A模', size_label: '42#', pairs_per_mold: 1, sole_material: 'MD', initial_quarter: '26Q4', opened_on: '2026-03-16' }).map(([key, value]) => `${key}：${value}`), [
-    '模具厂家：弘晟', '模具编号：QD-264301', '模具类别：A模', '模具码数：42#', '排模双数：一模一双', '鞋底材质：MD', '初始季度：26Q4', '开制日期：2026.3.16',
+    '模具厂家：弘晟', '模具编号：QD-264301', '模具类别：A模', '模具码数：42#', '鞋底材质：MD', '初始季度：26Q4', '开制日期：2026.3.16',
   ])
 })
 
@@ -18,8 +18,8 @@ test('old labels preserve code and size without inventing missing metadata', () 
   const rows = moldLabelRows({ kind: 'MOLD', code: 'OLD-1', size_label: '42' })
   assert.equal(rows[1][1], 'OLD-1')
   assert.equal(rows[3][1], '42#')
-  assert.equal(rows.filter(([, value]) => value === '—').length, 6)
-  assert.equal(moldLabelRows({ code: 'X', pairs_per_mold: 12 })[4][1], '一模十二双')
+  assert.equal(rows.filter(([, value]) => value === '—').length, 5)
+  assert.equal(moldProfileRows({ code: 'X', pairs_per_mold: 12 })[4][1], '一模十二双')
 })
 
 test('identities distinguish A/B and half sizes while printed number stays the style number', () => {
